@@ -36,7 +36,7 @@ const PERSONATOR_PROXY_URL = ""; // <-- SET THIS for production
  * Replace with your real Melissa Personator Search license key.
  * Do not commit a real key to a public repository.
  */
-const PERSONATOR_LICENSE_KEY = "REPLACE_WITH_YOUR_REAL_LICENSE_KEY";
+const PERSONATOR_LICENSE_KEY = "NNyQiGBQttkIhzONLxAqXx**";
 
 /**
  * Address update mode for Zoho CRM Leads:
