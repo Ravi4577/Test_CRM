@@ -5,11 +5,8 @@
  *   1. Zoho SDK PageLoad -> get current Lead ID
  *   2. Fetch current Lead from Zoho CRM (input only)
  *   3. Build Melissa Personator Search request from Lead fields
-<<<<<<< HEAD
- *   4. Call Melissa Personator Search API
-=======
  *   4. Call Melissa Personator Search API (broad consumer search)
->>>>>>> 88144df (Add Melissa license key for Personator Search)
+ *      with a fallback ladder if strict matches return zero records
  *   5. Render every matching Melissa record in the results table
  *   6. User selects a row -> preview shows
  *   7. Update button writes selected Melissa values to current Lead
@@ -170,20 +167,6 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
     console.log("Current Lead Data:", currentLeadRecord);
 
-<<<<<<< HEAD
-    // 2) Build Melissa Search params from Lead values
-    const params = buildMelissaSearchParams(currentLeadRecord);
-    console.log("Melissa Search request params:", params);
-
-    // 3) Call Melissa Personator Search API
-    const rawResponse = await callMelissaSearchAPI(params);
-    console.log("Melissa Search raw response:", rawResponse);
-    console.log("Melissa Search records:", rawResponse?.Records);
-
-    const trResult = String(rawResponse?.TransmissionResults || "");
-    const totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
-    const rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
-=======
     // 2) Build initial Melissa Search params from Lead values
     const baseParams = buildMelissaSearchParams(currentLeadRecord);
     console.log("Melissa Search request params:", baseParams);
@@ -206,7 +189,6 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     let rawRecords  = [];
     let totalRecords = 0;
     let licenseIssueDetected = false;
->>>>>>> 88144df (Add Melissa license key for Personator Search)
 
     for (let i = 0; i < attempts.length; i++) {
       const attempt = attempts[i];
@@ -244,28 +226,16 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
     setLoading(false);
 
-<<<<<<< HEAD
-    // Case 1: Melissa reports no matches at all
-    if (totalRecords === 0 || rawRecords.length === 0) {
-      setEmptyMessage("No Melissa Search records found for this Lead.");
-=======
     // License / access failure — distinct message
     if (licenseIssueDetected) {
       const tr = String(rawResponse?.TransmissionResults || "");
       console.error("Melissa license/access error. TransmissionResults:", tr, rawResponse);
       setEmptyMessage("Melissa license key or Personator Search access issue.");
->>>>>>> 88144df (Add Melissa license key for Personator Search)
       showEmpty(true);
       showResults(false);
       return;
     }
 
-<<<<<<< HEAD
-    // 4) Map ONLY from Melissa response.Records (never from lead)
-    const mapped = mapMelissaRecords(rawRecords);
-    console.log("Mapped Melissa records:", mapped);
-
-=======
     // All fallback attempts exhausted with no records
     if (rawRecords.length === 0) {
       setEmptyMessage("No Melissa Search records found after broad search.");
@@ -278,7 +248,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     const mapped = mapMelissaRecords(rawRecords);
     console.log("Mapped Melissa records:", mapped);
 
->>>>>>> 88144df (Add Melissa license key for Personator Search)
+
     // 5) Filter to rows that actually have at least one usable value
     const usableRecords = mapped.filter(
       (r) =>
@@ -292,11 +262,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     console.log("Usable Melissa records:", usableRecords);
 
     if (usableRecords.length === 0) {
-<<<<<<< HEAD
-      setEmptyMessage("No Melissa Search records found for this Lead.");
-=======
       setEmptyMessage("No Melissa Search records found after broad search.");
->>>>>>> 88144df (Add Melissa license key for Personator Search)
       showEmpty(true);
       showResults(false);
       return;
@@ -411,15 +377,11 @@ async function callMelissaSearchAPI(params) {
     "&postal=" + encodeURIComponent(params.postal || "") +
     "&opt=ReturnAllPages:True,SearchConditions:loose";
 
-<<<<<<< HEAD
-  console.log("Melissa Search API URL:", url);
-=======
   // Confirm the key actually made it into the request, but mask it in console
   const keyPresent = Boolean(PERSONATOR_LICENSE_KEY) &&
                      PERSONATOR_LICENSE_KEY !== "REPLACE_WITH_YOUR_REAL_LICENSE_KEY";
   console.log("Melissa Search API URL (key masked):", maskKeyInUrl(url));
   console.log("License key present in request:", keyPresent);
->>>>>>> 88144df (Add Melissa license key for Personator Search)
 
   const resp = await fetch(url, { method: "GET" });
   if (!resp.ok) {
