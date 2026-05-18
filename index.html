@@ -1,32 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Update Lead Address — Personator Consumer</title>
+  <title>Update Lead Address — Melissa Personator Search</title>
 
   <!-- Zoho CRM Embedded App SDK -->
   <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
 
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
   <div class="widget-shell">
 
     <!-- Header -->
     <header class="widget-header">
       <div class="title-group">
-        <h1>Personator Consumer Results</h1>
+        <h1>Melissa Personator Search Results</h1>
         <p class="subtitle" id="leadContext">Loading current Lead…</p>
       </div>
       <div class="header-actions">
-        <input
-          type="text"
-          id="filterInput"
-          class="filter-input"
-          placeholder="Filter results (street, city, state, zip, phone, email)…"
-          disabled
-        />
+        <input type="text" id="filterInput" class="filter-input"
+          placeholder="Filter results (street, city, state, zip, phone, email)…" disabled />
       </div>
     </header>
 
@@ -36,13 +33,13 @@
     <!-- Loading state -->
     <div id="loadingState" class="loading-state">
       <div class="spinner"></div>
-      <p>Fetching matches from Personator Consumer…</p>
+      <p>Fetching matches from Melissa Personator Search…</p>
     </div>
 
     <!-- No data state -->
     <div id="emptyState" class="empty-state hidden">
       <div class="empty-icon">∅</div>
-      <p>No Personator Consumer records found for this Lead.</p>
+      <p>No Melissa Search records found for this Lead.</p>
     </div>
 
     <!-- Results table -->
@@ -91,4 +88,5 @@
 
   <script src="script.js"></script>
 </body>
+
 </html>

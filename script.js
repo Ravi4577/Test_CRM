@@ -5,7 +5,7 @@
  *   1. Zoho SDK PageLoad -> get current Lead ID
  *   2. Fetch current Lead from Zoho CRM (input only)
  *   3. Build Melissa Personator Search request from Lead fields
- *   4. Call Melissa Personator Search API (broad consumer search)
+ *   4. Call Melissa Personator Search API
  *   5. Render every matching Melissa record in the results table
  *   6. User selects a row -> preview shows
  *   7. Update button writes selected Melissa values to current Lead
@@ -66,17 +66,17 @@ let selectedIndex = -1;
  * =============================== */
 
 const els = {
-  banner:       document.getElementById("banner"),
-  leadContext:  document.getElementById("leadContext"),
-  loading:      document.getElementById("loadingState"),
-  empty:        document.getElementById("emptyState"),
-  resultsWrap:  document.getElementById("resultsWrapper"),
-  resultsBody:  document.getElementById("resultsBody"),
-  previewSec:   document.getElementById("previewSection"),
-  previewGrid:  document.getElementById("previewGrid"),
-  updateBtn:    document.getElementById("updateBtn"),
-  cancelBtn:    document.getElementById("cancelBtn"),
-  filterInput:  document.getElementById("filterInput"),
+  banner: document.getElementById("banner"),
+  leadContext: document.getElementById("leadContext"),
+  loading: document.getElementById("loadingState"),
+  empty: document.getElementById("emptyState"),
+  resultsWrap: document.getElementById("resultsWrapper"),
+  resultsBody: document.getElementById("resultsBody"),
+  previewSec: document.getElementById("previewSection"),
+  previewGrid: document.getElementById("previewGrid"),
+  updateBtn: document.getElementById("updateBtn"),
+  cancelBtn: document.getElementById("cancelBtn"),
+  filterInput: document.getElementById("filterInput"),
   successModal: document.getElementById("successModal"),
   successClose: document.getElementById("successCloseBtn"),
 };
@@ -175,9 +175,9 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     console.log("Melissa Search raw response:", rawResponse);
     console.log("Melissa Search records:", rawResponse?.Records);
 
-    const trResult     = String(rawResponse?.TransmissionResults || "");
+    const trResult = String(rawResponse?.TransmissionResults || "");
     const totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
-    const rawRecords   = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
+    const rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
 
     console.log("TransmissionResults:", trResult);
     console.log("TotalRecords:", totalRecords);
@@ -264,11 +264,11 @@ function buildMelissaSearchParams(lead) {
   const ha = lead.Home_Address || {};
 
   return {
-    first:  lead.First_Name || "",
-    last:   lead.Last_Name  || "",
-    city:   lead.Home_Address_City  || ha.City  || lead.City  || "",
-    state:  lead.Home_Address_State || ha.State || lead.State || "",
-    postal: lead.Home_Address_Zip   || ha.Zip   || lead.Zip_Code || "",
+    first: lead.First_Name || "",
+    last: lead.Last_Name || "",
+    city: lead.Home_Address_City || ha.City || lead.City || "",
+    state: lead.Home_Address_State || ha.State || lead.State || "",
+    postal: lead.Home_Address_Zip || ha.Zip || lead.Zip_Code || "",
   };
 }
 
@@ -299,13 +299,13 @@ async function callMelissaSearchAPI(params) {
   // SearchConditions:loose -> broaden the consumer database match
   const url =
     PERSONATOR_ENDPOINT +
-    "?id="     + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
+    "?id=" + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
     "&cols=GrpAll" +
     "&format=JSON" +
-    "&first="  + encodeURIComponent(params.first  || "") +
-    "&last="   + encodeURIComponent(params.last   || "") +
-    "&city="   + encodeURIComponent(params.city   || "") +
-    "&state="  + encodeURIComponent(params.state  || "") +
+    "&first=" + encodeURIComponent(params.first || "") +
+    "&last=" + encodeURIComponent(params.last || "") +
+    "&city=" + encodeURIComponent(params.city || "") +
+    "&state=" + encodeURIComponent(params.state || "") +
     "&postal=" + encodeURIComponent(params.postal || "") +
     "&opt=ReturnAllPages:True,SearchConditions:loose";
 
@@ -350,10 +350,10 @@ function pickValue(obj, paths) {
 
 function buildStreetFromParts(record) {
   return [
-    record.AddressHouseNumber || record.ParsedAddressRange    || record.AddressRange,
+    record.AddressHouseNumber || record.ParsedAddressRange || record.AddressRange,
     record.AddressPreDirection || record.ParsedAddressPreDirection,
-    record.AddressStreetName  || record.ParsedStreetName,
-    record.AddressStreetSuffix || record.ParsedStreetSuffix   || record.AddressSuffix,
+    record.AddressStreetName || record.ParsedStreetName,
+    record.AddressStreetSuffix || record.ParsedStreetSuffix || record.AddressSuffix,
     record.AddressPostDirection || record.ParsedAddressPostDirection,
     record.AddressSuiteName,
     record.AddressSuiteNumber,
@@ -376,7 +376,7 @@ function mapMelissaRecords(records) {
     const lower = key.toLowerCase();
     if (
       lower.includes("address") ||
-      lower.includes("street")  ||
+      lower.includes("street") ||
       lower.includes("delivery") ||
       lower.includes("mailing") ||
       lower.includes("premise")
@@ -481,11 +481,11 @@ function mapMelissaRecords(records) {
 
     return {
       homeAddressStreet: street || "",
-      homeAddressState:  state  || "",
-      homeAddressCity:   city   || "",
-      homeAddressZip:    zip    || "",
-      phone:             phone  || "",
-      email:             email  || "",
+      homeAddressState: state || "",
+      homeAddressCity: city || "",
+      homeAddressZip: zip || "",
+      phone: phone || "",
+      email: email || "",
     };
   });
 }
@@ -512,11 +512,11 @@ function renderResults(records) {
 
     tr.innerHTML = `
       <td>${escapeHtml(rec.homeAddressStreet) || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressState)  || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressCity)   || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressZip)    || "—"}</td>
-      <td>${escapeHtml(rec.phone)             || "—"}</td>
-      <td>${escapeHtml(rec.email)             || "—"}</td>
+      <td>${escapeHtml(rec.homeAddressState) || "—"}</td>
+      <td>${escapeHtml(rec.homeAddressCity) || "—"}</td>
+      <td>${escapeHtml(rec.homeAddressZip) || "—"}</td>
+      <td>${escapeHtml(rec.phone) || "—"}</td>
+      <td>${escapeHtml(rec.email) || "—"}</td>
       <td class="action-cell">
         <button class="btn btn-select" data-action="select" data-index="${index}">
           Select
@@ -565,11 +565,11 @@ function markSelectedRow(index) {
 function renderPreview(rec) {
   const fields = [
     ["Home Address Street", rec.homeAddressStreet],
-    ["Home Address State",  rec.homeAddressState],
-    ["Home Address City",   rec.homeAddressCity],
-    ["Home Address Zip",    rec.homeAddressZip],
-    ["Phone",               rec.phone],
-    ["Email",               rec.email],
+    ["Home Address State", rec.homeAddressState],
+    ["Home Address City", rec.homeAddressCity],
+    ["Home Address Zip", rec.homeAddressZip],
+    ["Phone", rec.phone],
+    ["Email", rec.email],
   ];
 
   els.previewGrid.innerHTML = fields
@@ -687,9 +687,9 @@ function buildUpdatePayload(leadId, rec) {
       id: leadId,
       Home_Address: {
         Street: rec.homeAddressStreet || "",
-        State:  rec.homeAddressState  || "",
-        City:   rec.homeAddressCity   || "",
-        Zip:    rec.homeAddressZip    || "",
+        State: rec.homeAddressState || "",
+        City: rec.homeAddressCity || "",
+        Zip: rec.homeAddressZip || "",
       },
       Phone: rec.phone || "",
       Email: rec.email || "",
@@ -699,11 +699,11 @@ function buildUpdatePayload(leadId, rec) {
   return {
     id: leadId,
     Home_Address_Street: rec.homeAddressStreet || "",
-    Home_Address_State:  rec.homeAddressState  || "",
-    Home_Address_City:   rec.homeAddressCity   || "",
-    Home_Address_Zip:    rec.homeAddressZip    || "",
-    Phone:               rec.phone             || "",
-    Email:               rec.email             || "",
+    Home_Address_State: rec.homeAddressState || "",
+    Home_Address_City: rec.homeAddressCity || "",
+    Home_Address_Zip: rec.homeAddressZip || "",
+    Phone: rec.phone || "",
+    Email: rec.email || "",
   };
 }
 
