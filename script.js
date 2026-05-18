@@ -470,96 +470,15 @@ function buildStreetFromParts(record) {
 function mapMelissaRecords(records) {
   if (!Array.isArray(records) || records.length === 0) return [];
 
-  // Diagnostic: print the first record so unknown key names are discoverable
   console.log("FIRST RAW MELISSA RECORD:", JSON.stringify(records[0], null, 2));
-  Object.keys(records[0]).forEach((key) => {
-    console.log("MELISSA KEY:", key, "VALUE:", records[0][key]);
-  });
-  Object.keys(records[0]).forEach((key) => {
-    const lower = key.toLowerCase();
-    if (
-      lower.includes("address") ||
-      lower.includes("street") ||
-      lower.includes("delivery") ||
-      lower.includes("mailing") ||
-      lower.includes("premise")
-    ) {
-      console.log("POSSIBLE STREET KEY:", key, records[0][key]);
-    }
-  });
 
-  return records.map((record) => {
-    // Melissa Personator Search nests address fields under CurrentAddress.
-    const ca = record.CurrentAddress || {};
+  const rows = [];
 
-    const street =
-      pickValue(ca, ["AddressLine1", "AddressLine", "Address", "Street"]) ||
-      pickValue(record, [
-        "AddressLine1",
-        "Address1",
-        "StreetAddress",
-        "Street",
-        "DeliveryAddress",
-        "AddressDeliveryLine",
-        "DeliveryLine",
-        "AddressLine",
-        "Address.AddressLine1",
-        "Address.AddressLine",
-        "AddressDetails.AddressLine1",
-        "GrpAddressDetails.AddressLine1",
-        "MailingAddress.AddressLine1",
-      ]) ||
-      buildStreetFromParts(record) ||
-      "";
-
-    if (!street) {
-      console.warn("Street not returned by Melissa for this record.", record);
-    }
-
-    const city =
-      pickValue(ca, ["City", "Locality"]) ||
-      pickValue(record, [
-        "City",
-        "Locality",
-        "AddressCity",
-        "MailingCity",
-        "Address.City",
-        "AddressDetails.City",
-        "GrpAddressDetails.City",
-        "MailingAddress.City",
-      ]);
-
-    const state =
-      pickValue(ca, ["State", "AdministrativeArea", "StateProvince"]) ||
-      pickValue(record, [
-        "State",
-        "AdministrativeArea",
-        "AddressState",
-        "MailingState",
-        "StateProvince",
-        "Address.State",
-        "AddressDetails.State",
-        "GrpAddressDetails.State",
-        "MailingAddress.State",
-      ]);
-
-    const zip =
-      pickValue(ca, ["PostalCode", "Zip", "ZipCode"]) ||
-      pickValue(record, [
-        "PostalCode",
-        "Zip",
-        "ZipCode",
-        "AddressPostalCode",
-        "MailingPostalCode",
-        "PostalCodePlus4",
-        "Address.PostalCode",
-        "AddressDetails.PostalCode",
-        "GrpAddressDetails.PostalCode",
-        "MailingAddress.PostalCode",
-      ]);
-
-    console.log("PhoneRecords:", record.PhoneRecords);
-    console.log("EmailRecords:", record.EmailRecords);
+  records.forEach((record) => {
+    // Phone/email live at the PARENT record level — extract once and attach
+    // to every address row produced from this record.
+    console.log("Parent PhoneRecords:", record.PhoneRecords);
+    console.log("Parent EmailRecords:", record.EmailRecords);
 
     const phone =
       record.PhoneRecords?.[0]?.PhoneNumber ||
@@ -577,15 +496,78 @@ function mapMelissaRecords(records) {
       record.Email ||
       "";
 
-    return {
-      homeAddressStreet: toDisplayString(street),
-      homeAddressState: toDisplayString(state),
-      homeAddressCity: toDisplayString(city),
-      homeAddressZip: toDisplayString(zip),
+    console.log("Extracted phone:", phone);
+    console.log("Extracted email:", email);
+
+    const buildRow = (addr) => ({
+      homeAddressStreet: toDisplayString(
+        addr?.AddressLine1 || addr?.AddressLine || addr?.Address || addr?.Street || ""
+      ),
+      homeAddressState: toDisplayString(
+        addr?.State || addr?.AdministrativeArea || addr?.StateProvince || ""
+      ),
+      homeAddressCity: toDisplayString(addr?.City || addr?.Locality || ""),
+      homeAddressZip: toDisplayString(
+        addr?.PostalCode || addr?.Zip || addr?.ZipCode || ""
+      ),
       phone: toDisplayString(phone),
       email: toDisplayString(email),
-    };
+    });
+
+    if (record.CurrentAddress) {
+      rows.push(buildRow(record.CurrentAddress));
+    }
+
+    (record.PreviousAddresses || []).forEach((addr) => {
+      rows.push(buildRow(addr));
+    });
+
+    // Fallback: if the record has neither CurrentAddress nor PreviousAddresses,
+    // still emit one row using legacy flat keys so phone/email aren't lost.
+    if (!record.CurrentAddress && !(record.PreviousAddresses || []).length) {
+      const street =
+        pickValue(record, [
+          "AddressLine1", "Address1", "StreetAddress", "Street",
+          "DeliveryAddress", "AddressDeliveryLine", "DeliveryLine", "AddressLine",
+          "Address.AddressLine1", "Address.AddressLine",
+          "AddressDetails.AddressLine1", "GrpAddressDetails.AddressLine1",
+          "MailingAddress.AddressLine1",
+        ]) ||
+        buildStreetFromParts(record) ||
+        "";
+
+      const city = pickValue(record, [
+        "City", "Locality", "AddressCity", "MailingCity",
+        "Address.City", "AddressDetails.City",
+        "GrpAddressDetails.City", "MailingAddress.City",
+      ]);
+
+      const state = pickValue(record, [
+        "State", "AdministrativeArea", "AddressState", "MailingState", "StateProvince",
+        "Address.State", "AddressDetails.State",
+        "GrpAddressDetails.State", "MailingAddress.State",
+      ]);
+
+      const zip = pickValue(record, [
+        "PostalCode", "Zip", "ZipCode",
+        "AddressPostalCode", "MailingPostalCode", "PostalCodePlus4",
+        "Address.PostalCode", "AddressDetails.PostalCode",
+        "GrpAddressDetails.PostalCode", "MailingAddress.PostalCode",
+      ]);
+
+      rows.push({
+        homeAddressStreet: toDisplayString(street),
+        homeAddressState: toDisplayString(state),
+        homeAddressCity: toDisplayString(city),
+        homeAddressZip: toDisplayString(zip),
+        phone: toDisplayString(phone),
+        email: toDisplayString(email),
+      });
+    }
   });
+
+  console.log("Flattened Melissa rows:", rows);
+  return rows;
 }
 
 /* ===============================
