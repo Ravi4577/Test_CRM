@@ -412,6 +412,29 @@ function maskKeyInUrl(url) {
  *   - Zip is never copied into Street/State/City
  * ===================================================================== */
 
+// Guarantee a string for table/preview rendering. Prevents "[object Object]"
+// if a deeply nested field unexpectedly resolves to an object or array.
+function toDisplayString(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
+}
+
+// Pull a string from a PhoneRecords[0] / EmailRecords[0] entry, which may be
+// either a plain string or an object whose value lives under one of several keys.
+function extractContact(entry, keys) {
+  if (!entry) return "";
+  if (typeof entry === "string") return entry.trim();
+  if (typeof entry === "object") {
+    for (let i = 0; i < keys.length; i++) {
+      const v = entry[keys[i]];
+      if (typeof v === "string" && v.trim() !== "") return v.trim();
+    }
+  }
+  return "";
+}
+
 function pickValue(obj, paths) {
   for (let i = 0; i < paths.length; i++) {
     const parts = paths[i].split(".");
@@ -466,23 +489,20 @@ function mapMelissaRecords(records) {
   });
 
   return records.map((record) => {
-    // STREET — every known Melissa street key, then parsed parts.
-    // Plus4 deliberately excluded (it is the ZIP+4 extension, not street).
+    // Melissa Personator Search nests address fields under CurrentAddress.
+    const ca = record.CurrentAddress || {};
+
     const street =
-      record.AddressLine1 ||
-      record.Address ||
-      record.DeliveryAddress ||
-      record.MailingAddress ||
-      record.Address1 ||
-      record.StreetAddress ||
-      record.Street ||
-      record.PremisesAddress ||
-      record.PremiseAddress ||
-      record.AddressDeliveryLine ||
-      record.DeliveryLine ||
-      record.AddressLine ||
-      record.CurrentAddress ||
+      pickValue(ca, ["AddressLine1", "AddressLine", "Address", "Street"]) ||
       pickValue(record, [
+        "AddressLine1",
+        "Address1",
+        "StreetAddress",
+        "Street",
+        "DeliveryAddress",
+        "AddressDeliveryLine",
+        "DeliveryLine",
+        "AddressLine",
         "Address.AddressLine1",
         "Address.AddressLine",
         "AddressDetails.AddressLine1",
@@ -496,76 +516,87 @@ function mapMelissaRecords(records) {
       console.warn("Street not returned by Melissa for this record.", record);
     }
 
-    // CITY — only city keys
-    const city = pickValue(record, [
-      "City",
-      "Locality",
-      "AddressCity",
-      "MailingCity",
-      "Address.City",
-      "AddressDetails.City",
-      "GrpAddressDetails.City",
-      "MailingAddress.City",
-    ]);
+    const city =
+      pickValue(ca, ["City", "Locality"]) ||
+      pickValue(record, [
+        "City",
+        "Locality",
+        "AddressCity",
+        "MailingCity",
+        "Address.City",
+        "AddressDetails.City",
+        "GrpAddressDetails.City",
+        "MailingAddress.City",
+      ]);
 
-    // STATE — only state keys
-    const state = pickValue(record, [
-      "State",
-      "AdministrativeArea",
-      "AddressState",
-      "MailingState",
-      "StateProvince",
-      "Address.State",
-      "AddressDetails.State",
-      "GrpAddressDetails.State",
-      "MailingAddress.State",
-    ]);
+    const state =
+      pickValue(ca, ["State", "AdministrativeArea", "StateProvince"]) ||
+      pickValue(record, [
+        "State",
+        "AdministrativeArea",
+        "AddressState",
+        "MailingState",
+        "StateProvince",
+        "Address.State",
+        "AddressDetails.State",
+        "GrpAddressDetails.State",
+        "MailingAddress.State",
+      ]);
 
-    // ZIP — only postal keys; never leaks anywhere else
-    const zip = pickValue(record, [
-      "PostalCode",
-      "Zip",
-      "ZipCode",
-      "AddressPostalCode",
-      "MailingPostalCode",
-      "PostalCodePlus4",
-      "Address.PostalCode",
-      "AddressDetails.PostalCode",
-      "GrpAddressDetails.PostalCode",
-      "MailingAddress.PostalCode",
-    ]);
+    const zip =
+      pickValue(ca, ["PostalCode", "Zip", "ZipCode"]) ||
+      pickValue(record, [
+        "PostalCode",
+        "Zip",
+        "ZipCode",
+        "AddressPostalCode",
+        "MailingPostalCode",
+        "PostalCodePlus4",
+        "Address.PostalCode",
+        "AddressDetails.PostalCode",
+        "GrpAddressDetails.PostalCode",
+        "MailingAddress.PostalCode",
+      ]);
 
-    const phone = pickValue(record, [
-      "PhoneNumber",
-      "Phone",
-      "Phone_Number",
-      "Phone1",
-      "ParsedPhoneNumber",
-      "HomePhone",
-      "PhoneDetails.PhoneNumber",
-      "ParsedPhone.PhoneNumber",
-      "GrpParsedPhone.PhoneNumber",
-      "GrpPhone.PhoneNumber",
-    ]);
+    const phone = extractContact(
+      Array.isArray(record.PhoneRecords) ? record.PhoneRecords[0] : null,
+      ["PhoneNumber", "Phone", "Phone_Number", "Number", "ParsedPhoneNumber"]
+    ) ||
+      pickValue(record, [
+        "PhoneNumber",
+        "Phone",
+        "Phone_Number",
+        "Phone1",
+        "ParsedPhoneNumber",
+        "HomePhone",
+        "PhoneDetails.PhoneNumber",
+        "ParsedPhone.PhoneNumber",
+        "GrpParsedPhone.PhoneNumber",
+        "GrpPhone.PhoneNumber",
+      ]);
 
-    const email = pickValue(record, [
-      "EmailAddress",
-      "Email",
-      "Email_Address",
-      "Email1",
-      "EmailDetails.EmailAddress",
-      "ParsedEmail.EmailAddress",
-      "GrpParsedEmail.EmailAddress",
-      "GrpEmail.EmailAddress",
-    ]);
+    const email = extractContact(
+      Array.isArray(record.EmailRecords) ? record.EmailRecords[0] : null,
+      ["EmailAddress", "Email", "Email_Address", "Address"]
+    ) ||
+      pickValue(record, [
+        "EmailAddress",
+        "Email",
+        "Email_Address",
+        "Email1",
+        "EmailDetails.EmailAddress",
+        "ParsedEmail.EmailAddress",
+        "GrpParsedEmail.EmailAddress",
+        "GrpEmail.EmailAddress",
+      ]);
 
     return {
-      homeAddressStreet: street || "",
-      homeAddressState: state || "",
-      homeAddressCity: city || "",
-      homeAddressZip: zip || "",
-      phone: phone || "",
-      email: email || "",
+      homeAddressStreet: toDisplayString(street),
+      homeAddressState: toDisplayString(state),
+      homeAddressCity: toDisplayString(city),
+      homeAddressZip: toDisplayString(zip),
+      phone: toDisplayString(phone),
+      email: toDisplayString(email),
     };
   });
 }
