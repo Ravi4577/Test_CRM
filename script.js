@@ -98,7 +98,7 @@ const els = {
   resultsBody: document.getElementById("resultsBody"),
   previewSec: document.getElementById("previewSection"),
   previewGrid: document.getElementById("previewGrid"),
-  updateBtn: document.getElementById("updateBtn"),
+  updateBtn: document.getElementById("updateLeadBtn"),
   cancelBtn: document.getElementById("cancelBtn"),
   filterInput: document.getElementById("filterInput"),
   successModal: document.getElementById("successModal"),
@@ -724,8 +724,44 @@ els.filterInput.addEventListener("input", (e) => {
  * UPDATE LEAD IN ZOHO CRM
  * =============================== */
 
-els.updateBtn.addEventListener("click", async () => {
-  if (!sdkReady || !currentLeadId || !selectedMelissaRecord) return;
+// Attach the Update Lead click handler after the DOM has parsed. The script
+// tag is at the end of <body>, so the element exists by now in normal flow,
+// but the readyState branch covers the case where this file is bundled or
+// loaded async/defer.
+function attachUpdateLeadHandler() {
+  const updateLeadBtn = document.getElementById("updateLeadBtn");
+  if (!updateLeadBtn) {
+    console.error("attachUpdateLeadHandler: #updateLeadBtn not found in DOM.");
+    return;
+  }
+
+  updateLeadBtn.addEventListener("click", onUpdateLeadClick);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", attachUpdateLeadHandler);
+} else {
+  attachUpdateLeadHandler();
+}
+
+async function onUpdateLeadClick() {
+  console.log("Update Lead button clicked");
+  console.log("Current Lead ID:", currentLeadId);
+  console.log("Selected Melissa Record:", selectedMelissaRecord);
+  console.log("SDK Ready:", sdkReady);
+
+  if (!sdkReady) {
+    showBanner("Zoho SDK is not ready.", "error");
+    return;
+  }
+  if (!currentLeadId) {
+    showBanner("Current Lead ID not found.", "error");
+    return;
+  }
+  if (!selectedMelissaRecord) {
+    showBanner("Please select a Melissa record first.", "error");
+    return;
+  }
 
   hideBanner();
   els.updateBtn.disabled = true;
@@ -818,7 +854,7 @@ els.updateBtn.addEventListener("click", async () => {
     els.updateBtn.disabled = false;
     els.updateBtn.textContent = "Update Lead";
   }
-});
+}
 
 // Compare the values we sent against what the Lead actually contains after
 // the update. We accept either the compound (Home_Address.Street) or the
