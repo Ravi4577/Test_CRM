@@ -232,7 +232,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       }
 
       totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
-      rawRecords   = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
+      rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
 
       if (totalRecords > 0 && rawRecords.length > 0) {
         console.log(`Melissa returned ${rawRecords.length} records on attempt #${i + 1} (${attempt.label}).`);
