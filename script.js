@@ -372,50 +372,108 @@ function buildMelissaSearchParams(lead) {
  * MELISSA SEARCH — API CALL
  * =============================== */
 
+const MELISSA_FETCH_TIMEOUT_MS = 20000;
+
+// Public entry point — wraps the actual fetch in a 20s AbortController timeout
+// and retries once on failure (timeout, network error, non-2xx). The browser's
+// own connection-timeout (ERR_CONNECTION_TIMED_OUT) can take ~90s, so the
+// client-side AbortController gives the user a faster, more predictable
+// failure mode.
 async function callMelissaSearchAPI(params) {
-  // Backend proxy path (preferred for production — keeps key off the wire)
-  if (PERSONATOR_PROXY_URL) {
-    const resp = await fetch(PERSONATOR_PROXY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    });
-    if (!resp.ok) {
-      throw new Error(`Proxy returned ${resp.status} ${resp.statusText}`);
+  console.log("Using proxy:", Boolean(PERSONATOR_PROXY_URL));
+  console.log("Melissa Search params:", params);
+
+  const maxAttempts = 2; // initial + 1 retry
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetchMelissaOnce(params);
+    } catch (error) {
+      lastError = error;
+      console.error(
+        `Melissa Search fetch failed (attempt ${attempt}/${maxAttempts}):`,
+        error
+      );
+      if (attempt < maxAttempts) {
+        console.log("Retrying Melissa Search...");
+      }
     }
-    return await resp.json();
   }
 
-  console.warn(
-    "Calling Melissa Personator Search directly from frontend. " +
-    "Do not expose your license key in production."
+  throw lastError;
+}
+
+async function fetchMelissaOnce(params) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    MELISSA_FETCH_TIMEOUT_MS
   );
 
-  // ReturnAllPages:True  -> Melissa may return multiple matching records
-  // SearchConditions:loose -> broaden the consumer database match
-  const url =
-    PERSONATOR_ENDPOINT +
-    "?id=" + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
-    "&cols=GrpAll" +
-    "&format=JSON" +
-    "&first=" + encodeURIComponent(params.first || "") +
-    "&last=" + encodeURIComponent(params.last || "") +
-    "&city=" + encodeURIComponent(params.city || "") +
-    "&state=" + encodeURIComponent(params.state || "") +
-    "&postal=" + encodeURIComponent(params.postal || "") +
-    "&opt=ReturnAllPages:True,SearchConditions:loose";
+  try {
+    // Backend proxy path (preferred for production — keeps key off the wire).
+    if (PERSONATOR_PROXY_URL) {
+      const response = await fetch(PERSONATOR_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: controller.signal,
+      });
+      console.log("Melissa Search response status:", response.status);
 
-  // Confirm the key actually made it into the request, but mask it in console
-  const keyPresent = Boolean(PERSONATOR_LICENSE_KEY) &&
-                     PERSONATOR_LICENSE_KEY !== "REPLACE_WITH_YOUR_REAL_LICENSE_KEY";
-  console.log("Melissa Search API URL (key masked):", maskKeyInUrl(url));
-  console.log("License key present in request:", keyPresent);
+      if (!response.ok) {
+        throw new Error(`Proxy returned ${response.status} ${response.statusText}`);
+      }
 
-  const resp = await fetch(url, { method: "GET" });
-  if (!resp.ok) {
-    throw new Error(`Melissa Search API error ${resp.status} ${resp.statusText}`);
+      const data = await response.json();
+      console.log("Melissa Search raw response:", data);
+      return data;
+    }
+
+    // Direct browser-to-Melissa call (testing only — exposes the license key).
+    console.warn(
+      "Calling Melissa Personator Search directly from frontend. " +
+      "Do not expose your license key in production."
+    );
+
+    const url =
+      PERSONATOR_ENDPOINT +
+      "?id=" + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
+      "&cols=GrpAll" +
+      "&format=JSON" +
+      "&first=" + encodeURIComponent(params.first || "") +
+      "&last=" + encodeURIComponent(params.last || "") +
+      "&city=" + encodeURIComponent(params.city || "") +
+      "&state=" + encodeURIComponent(params.state || "") +
+      "&postal=" + encodeURIComponent(params.postal || "") +
+      "&opt=ReturnAllPages:True,SearchConditions:loose";
+
+    const maskedUrl = maskKeyInUrl(url);
+    console.log("Melissa Search URL:", maskedUrl);
+
+    const response = await fetch(url, { method: "GET", signal: controller.signal });
+    console.log("Melissa Search response status:", response.status);
+
+    if (!response.ok) {
+      throw new Error(
+        `Melissa Search API error ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    console.log("Melissa Search raw response:", data);
+    return data;
+  } catch (error) {
+    // AbortError fires when the 20s timer trips controller.abort(). Surface
+    // a user-friendly message so the PageLoad catch can show it in the banner.
+    if (error && error.name === "AbortError") {
+      throw new Error("Melissa Search request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return await resp.json();
 }
 
 /**
