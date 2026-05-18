@@ -157,7 +157,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   try {
     // 1) Fetch current Lead — used ONLY as input parameters for Personator
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
-    console.log("Current Zoho Lead used only for search:", currentLeadRecord);
+    console.log("Current Lead used only for API input:", currentLeadRecord);
 
     // 2) Call Personator Consumer API using Lead data as input
     const params = buildPersonatorParams(currentLeadRecord);
@@ -165,7 +165,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
     const rawResponse = await callPersonatorAPI(params);
     console.log("Personator raw response:", rawResponse);
-    console.log("Personator records only:", rawResponse?.Records);
+    console.log("Personator Records:", rawResponse?.Records);
 
     // ----------------------------------------------------------
     // Check Melissa transmission result and TotalRecords FIRST
@@ -188,9 +188,9 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // 3) Map records
+    // 3) Map records — Personator response ONLY (never lead data)
     const mapped = mapPersonatorRecords(rawResponse);
-    console.log("Mapped Personator records:", mapped);
+    console.log("Mapped records from Personator only:", mapped);
 
     // 4) Filter to usable records (must have at least one field with a value)
     const usableRecords = mapped.filter(
@@ -202,7 +202,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
         r.phone ||
         r.email
     );
-    console.log("Usable Personator records after filter:", usableRecords);
+    console.log("Usable Personator records:", usableRecords);
 
     // Case 2: Records exist but none have usable data
     if (usableRecords.length === 0) {
