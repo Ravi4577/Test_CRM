@@ -1,14 +1,20 @@
 /* =============================================================
- * Personator Consumer — Lead Update Widget
+ * Melissa Personator Search — Lead Update Widget
  * -------------------------------------------------------------
  * Flow:
  *   1. Zoho SDK PageLoad -> get current Lead ID
- *   2. Fetch current Lead from Zoho CRM
- *   3. Call Personator Consumer API using Lead values
- *   4. Render multiple results in horizontal table
- *   5. User selects a row -> preview shows
- *   6. Update button updates current Lead with selected data
- *   7. Success modal -> close popup
+ *   2. Fetch current Lead from Zoho CRM (input only)
+ *   3. Build Melissa Personator Search request from Lead fields
+ *   4. Call Melissa Personator Search API (broad consumer search)
+ *   5. Render every matching Melissa record in the results table
+ *   6. User selects a row -> preview shows
+ *   7. Update button writes selected Melissa values to current Lead
+ *   8. Success modal -> close popup
+ *
+ * IMPORTANT: Current Lead data is used ONLY to build the API
+ * request and to perform the final Zoho update. It is NEVER
+ * used to fill rows in the results table — rows come from
+ * response.Records only.
  * ============================================================= */
 
 /* ===============================
@@ -16,26 +22,30 @@
  * =============================== */
 
 const PERSONATOR_ENDPOINT =
-"https://personator.melissadata.net/v3/WEB/ContactVerify/doContactVerify";
+  "https://personatorsearch.melissadata.net/WEB/doPersonatorSearch";
 
 /**
- * Backend proxy URL (preferred). Leave empty string to call Personator directly.
+ * Backend proxy URL (preferred for production). Leave empty string to
+ * call Melissa directly from the browser.
  * SECURITY: Do NOT expose the API key in frontend production code.
  */
 const PERSONATOR_PROXY_URL = ""; // <-- SET THIS for production
 
 /**
- * TEMPORARY/TESTING ONLY — direct license key.
- * Do not expose API key in frontend production. Use backend proxy.
+ * TEMPORARY/TESTING ONLY — placeholder license key.
+ * Replace with your real Melissa Personator Search license key.
+ * Do not commit a real key to a public repository.
  */
-const PERSONATOR_LICENSE_KEY = "NNyQiGBQttkIhzONLxAqXx**";
-
-const PERSONATOR_COLUMNS = "GrpAddress,GrpName,GrpPhone,GrpEmail,GrpCensus,GrpAddressDetails";
+const PERSONATOR_LICENSE_KEY = "REPLACE_WITH_YOUR_REAL_LICENSE_KEY";
 
 /**
  * Address update mode for Zoho CRM Leads:
  *   "separate" -> Home_Address_Street, Home_Address_State, ...
- *   "compound" -> single Home_Address object with sub-fields
+ *                 Use this if your Lead layout shows the address as
+ *                 four independent fields.
+ *   "compound" -> single Home_Address object with sub-fields.
+ *                 Use this if your Lead layout uses Zoho's compound
+ *                 address field (one block, multiple sub-fields).
  */
 const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
 
@@ -46,9 +56,9 @@ const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
 let sdkReady = false;
 let currentLeadId = null;
 let currentLeadRecord = null;
-let personatorRecords = [];
+let melissaRecords = [];
 let filteredRecords = [];
-let selectedPersonatorRecord = null;
+let selectedMelissaRecord = null;
 let selectedIndex = -1;
 
 /* ===============================
@@ -93,9 +103,6 @@ function showEmpty(show) {
   els.empty.classList.toggle("hidden", !show);
 }
 
-/**
- * Update the empty-state message text without touching design.
- */
 function setEmptyMessage(msg) {
   const p = els.empty.querySelector("p");
   if (p) p.textContent = msg;
@@ -121,7 +128,7 @@ function escapeHtml(str) {
 
 function refreshUpdateButton() {
   els.updateBtn.disabled =
-    !sdkReady || !currentLeadId || !selectedPersonatorRecord;
+    !sdkReady || !currentLeadId || !selectedMelissaRecord;
 }
 
 /* ===============================
@@ -155,24 +162,22 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   els.leadContext.textContent = `Current Lead ID: ${currentLeadId}`;
 
   try {
-    // 1) Fetch current Lead — used ONLY as input parameters for Personator
+    // 1) Fetch current Lead — used ONLY as Melissa Search input + final update target
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
-    console.log("Current Lead used only for API input:", currentLeadRecord);
+    console.log("Current Lead Data:", currentLeadRecord);
 
-    // 2) Call Personator Consumer API using Lead data as input
-    const params = buildPersonatorParams(currentLeadRecord);
-    console.log("Personator API request params:", params);
+    // 2) Build Melissa Search params from Lead values
+    const params = buildMelissaSearchParams(currentLeadRecord);
+    console.log("Melissa Search request params:", params);
 
-    const rawResponse = await callPersonatorAPI(params);
-    console.log("Personator raw response:", rawResponse);
-    console.log("Personator Records:", rawResponse?.Records);
+    // 3) Call Melissa Personator Search API
+    const rawResponse = await callMelissaSearchAPI(params);
+    console.log("Melissa Search raw response:", rawResponse);
+    console.log("Melissa Search records:", rawResponse?.Records);
 
-    // ----------------------------------------------------------
-    // Check Melissa transmission result and TotalRecords FIRST
-    // ----------------------------------------------------------
-    const trResult = String(rawResponse?.TransmissionResults || "");
+    const trResult     = String(rawResponse?.TransmissionResults || "");
     const totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
-    const rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
+    const rawRecords   = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
 
     console.log("TransmissionResults:", trResult);
     console.log("TotalRecords:", totalRecords);
@@ -180,19 +185,19 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
     setLoading(false);
 
-    // Case 1: No exact match according to Melissa
-    if (trResult.indexOf("GE02") !== -1 || totalRecords === 0) {
-      setEmptyMessage("No exact Personator match found for this Lead.");
+    // Case 1: Melissa reports no matches at all
+    if (totalRecords === 0 || rawRecords.length === 0) {
+      setEmptyMessage("No Melissa Search records found for this Lead.");
       showEmpty(true);
       showResults(false);
       return;
     }
 
-    // 3) Map records — Personator response ONLY (never lead data)
-    const mapped = mapPersonatorRecords(rawResponse);
-    console.log("Mapped records from Personator only:", mapped);
+    // 4) Map ONLY from Melissa response.Records (never from lead)
+    const mapped = mapMelissaRecords(rawRecords);
+    console.log("Mapped Melissa records:", mapped);
 
-    // 4) Filter to usable records (must have at least one field with a value)
+    // 5) Filter to rows that actually have at least one usable value
     const usableRecords = mapped.filter(
       (r) =>
         r.homeAddressStreet ||
@@ -202,28 +207,17 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
         r.phone ||
         r.email
     );
-    console.log("Usable Personator records:", usableRecords);
+    console.log("Usable Melissa records:", usableRecords);
 
-    // Case 2: Records exist but none have usable data
     if (usableRecords.length === 0) {
-      if (rawRecords.length > 0) {
-        console.log(
-          "Raw response contained records but no usable address/contact data:",
-          rawResponse
-        );
-        setEmptyMessage(
-          "Personator returned a response, but no usable address/contact data was found."
-        );
-      } else {
-        setEmptyMessage("No usable Personator Consumer data found for this Lead.");
-      }
+      setEmptyMessage("No Melissa Search records found for this Lead.");
       showEmpty(true);
       showResults(false);
       return;
     }
 
-    // 5) Render only usable records
-    personatorRecords = usableRecords;
+    // 6) Render
+    melissaRecords = usableRecords;
     filteredRecords = [...usableRecords];
 
     renderResults(filteredRecords);
@@ -233,7 +227,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     console.error("Widget load error:", err);
     setLoading(false);
     showBanner(
-      `Failed to load Personator results: ${err.message || err}`,
+      `Failed to load Melissa Search results: ${err.message || err}`,
       "error"
     );
   }
@@ -261,45 +255,29 @@ async function fetchCurrentLead(leadId) {
 }
 
 /* ===============================
- * PERSONATOR — INPUT PARAMS
+ * MELISSA SEARCH — INPUT PARAMS
+ * -------------------------------
+ * Current Lead values are used ONLY to seed the search.
  * =============================== */
 
-function buildPersonatorParams(lead) {
-  const fullName =
-    lead.Full_Name ||
-    [lead.First_Name, lead.Last_Name].filter(Boolean).join(" ").trim();
-
+function buildMelissaSearchParams(lead) {
   const ha = lead.Home_Address || {};
-  const homeStreet = lead.Home_Address_Street || ha.Street || lead.Street || "";
-  const homeCity   = lead.Home_Address_City   || ha.City   || lead.City   || "";
-  const homeState  = lead.Home_Address_State  || ha.State  || lead.State  || "";
-  const homeZip    = lead.Home_Address_Zip    || ha.Zip    || lead.Zip_Code || "";
 
-  const params = {
-    full:   fullName,
+  return {
     first:  lead.First_Name || "",
     last:   lead.Last_Name  || "",
-    a1:     homeStreet,
-    city:   homeCity,
-    state:  homeState,
-    postal: homeZip,
-    phone:  lead.Phone  || lead.Mobile || "",
-    email:  lead.Email  || "",
-    ctry:   "US",
+    city:   lead.Home_Address_City  || ha.City  || lead.City  || "",
+    state:  lead.Home_Address_State || ha.State || lead.State || "",
+    postal: lead.Home_Address_Zip   || ha.Zip   || lead.Zip_Code || "",
   };
-
-  Object.keys(params).forEach((k) => {
-    if (!params[k]) delete params[k];
-  });
-
-  return params;
 }
 
 /* ===============================
- * PERSONATOR — API CALL
+ * MELISSA SEARCH — API CALL
  * =============================== */
 
-async function callPersonatorAPI(params) {
+async function callMelissaSearchAPI(params) {
+  // Backend proxy path (preferred for production — keeps key off the wire)
   if (PERSONATOR_PROXY_URL) {
     const resp = await fetch(PERSONATOR_PROXY_URL, {
       method: "POST",
@@ -313,52 +291,53 @@ async function callPersonatorAPI(params) {
   }
 
   console.warn(
-    "Calling Personator directly from frontend. Do not expose API key in production."
+    "Calling Melissa Personator Search directly from frontend. " +
+    "Do not expose your license key in production."
   );
 
-  const query = new URLSearchParams({
-    id:     PERSONATOR_LICENSE_KEY,
-    format: "json",
-    cols:   PERSONATOR_COLUMNS,
-    ...params,
-  });
+  // ReturnAllPages:True  -> Melissa may return multiple matching records
+  // SearchConditions:loose -> broaden the consumer database match
+  const url =
+    PERSONATOR_ENDPOINT +
+    "?id="     + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
+    "&cols=GrpAll" +
+    "&format=JSON" +
+    "&first="  + encodeURIComponent(params.first  || "") +
+    "&last="   + encodeURIComponent(params.last   || "") +
+    "&city="   + encodeURIComponent(params.city   || "") +
+    "&state="  + encodeURIComponent(params.state  || "") +
+    "&postal=" + encodeURIComponent(params.postal || "") +
+    "&opt=ReturnAllPages:True,SearchConditions:loose";
 
-  const url = `${PERSONATOR_ENDPOINT}?${query.toString()}`;
+  console.log("Melissa Search API URL:", url);
 
   const resp = await fetch(url, { method: "GET" });
   if (!resp.ok) {
-    throw new Error(`Personator API error ${resp.status} ${resp.statusText}`);
+    throw new Error(`Melissa Search API error ${resp.status} ${resp.statusText}`);
   }
   return await resp.json();
 }
 
 /* =====================================================================
- * PERSONATOR — RESPONSE MAPPING (FIXED)
+ * MELISSA SEARCH — RESPONSE MAPPING
  * ---------------------------------------------------------------------
- * IMPORTANT: This mapper reads ONLY from response.Records (the Personator
- * API result). It never references currentLeadRecord or any Zoho lead
- * field. If the rendered rows look identical to the lead, that is because
- * Personator echoed the verified input back — not because lead data
- * leaked into the table.
+ * Reads ONLY from response.Records. Never references currentLeadRecord
+ * or any Zoho lead field.
  *
- * Handles both flat field names and nested objects.
- * Logs the first raw record in detail so unknown field names are visible.
- * Supports many possible key variants used across Melissa endpoints.
+ * Strict isolation rules:
+ *   - Street cell holds ONLY street/address values
+ *   - State  cell holds ONLY state values
+ *   - City   cell holds ONLY city values
+ *   - Zip    cell holds ONLY postal/zip values
+ *   - Zip is never copied into Street/State/City
  * ===================================================================== */
 
-/**
- * Pick the first non-empty value from a list of paths. Each path may use
- * dot-notation to walk into nested objects, e.g. "Address.City".
- */
 function pickValue(obj, paths) {
   for (let i = 0; i < paths.length; i++) {
     const parts = paths[i].split(".");
     let v = obj;
     for (let j = 0; j < parts.length; j++) {
-      if (v === null || v === undefined) {
-        v = undefined;
-        break;
-      }
+      if (v === null || v === undefined) { v = undefined; break; }
       v = v[parts[j]];
     }
     if (v !== null && v !== undefined && v !== "") {
@@ -369,17 +348,13 @@ function pickValue(obj, paths) {
   return "";
 }
 
-/**
- * Some Melissa columns split the address into parsed parts.
- * Build a full street string from those parts as a fallback.
- */
 function buildStreetFromParts(record) {
   return [
-    record.AddressHouseNumber     || record.ParsedAddressRange         || record.AddressRange,
-    record.AddressPreDirection    || record.ParsedAddressPreDirection,
-    record.AddressStreetName      || record.ParsedStreetName,
-    record.AddressStreetSuffix    || record.ParsedStreetSuffix         || record.AddressSuffix,
-    record.AddressPostDirection   || record.ParsedAddressPostDirection,
+    record.AddressHouseNumber || record.ParsedAddressRange    || record.AddressRange,
+    record.AddressPreDirection || record.ParsedAddressPreDirection,
+    record.AddressStreetName  || record.ParsedStreetName,
+    record.AddressStreetSuffix || record.ParsedStreetSuffix   || record.AddressSuffix,
+    record.AddressPostDirection || record.ParsedAddressPostDirection,
     record.AddressSuiteName,
     record.AddressSuiteNumber,
   ]
@@ -389,53 +364,38 @@ function buildStreetFromParts(record) {
     .trim();
 }
 
-function mapPersonatorRecords(response) {
-  if (!response) return [];
+function mapMelissaRecords(records) {
+  if (!Array.isArray(records) || records.length === 0) return [];
 
-  const records =
-    response.Records ||
-    response.records ||
-    response.Data ||
-    response.results ||
-    [];
-
-  if (!Array.isArray(records)) return [];
-
-  // ---- Deep diagnostic logging on the first record ----
-  if (records[0]) {
-    console.log("FIRST RAW PERSONATOR RECORD JSON:", JSON.stringify(records[0], null, 2));
-    Object.keys(records[0]).forEach((key) => {
-      console.log("PERSONATOR KEY:", key, "VALUE:", records[0][key]);
-    });
-    // Highlight any keys that could plausibly carry the street value
-    Object.keys(records[0]).forEach((key) => {
-      const lower = key.toLowerCase();
-      if (
-        lower.includes("address") ||
-        lower.includes("street") ||
-        lower.includes("delivery") ||
-        lower.includes("mailing") ||
-        lower.includes("premise")
-      ) {
-        console.log("POSSIBLE STREET KEY:", key, records[0][key]);
-      }
-    });
-  }
+  // Diagnostic: print the first record so unknown key names are discoverable
+  console.log("FIRST RAW MELISSA RECORD:", JSON.stringify(records[0], null, 2));
+  Object.keys(records[0]).forEach((key) => {
+    console.log("MELISSA KEY:", key, "VALUE:", records[0][key]);
+  });
+  Object.keys(records[0]).forEach((key) => {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes("address") ||
+      lower.includes("street")  ||
+      lower.includes("delivery") ||
+      lower.includes("mailing") ||
+      lower.includes("premise")
+    ) {
+      console.log("POSSIBLE STREET KEY:", key, records[0][key]);
+    }
+  });
 
   return records.map((record) => {
-    /*
-     * STREET — try every known Personator/Melissa street key, then fall back
-     * to parsed address parts. Never falls through to ZIP/State/City.
-     * (Plus4 deliberately excluded — it is the ZIP+4 extension, not street.)
-     */
+    // STREET — every known Melissa street key, then parsed parts.
+    // Plus4 deliberately excluded (it is the ZIP+4 extension, not street).
     const street =
       record.AddressLine1 ||
-      record.DeliveryAddress ||
       record.Address ||
+      record.DeliveryAddress ||
+      record.MailingAddress ||
       record.Address1 ||
       record.StreetAddress ||
       record.Street ||
-      record.MailingAddress ||
       record.PremisesAddress ||
       record.PremiseAddress ||
       record.AddressDeliveryLine ||
@@ -449,25 +409,14 @@ function mapPersonatorRecords(response) {
         "GrpAddressDetails.AddressLine1",
         "MailingAddress.AddressLine1",
       ]) ||
-      [
-        record.AddressHouseNumber,
-        record.AddressPreDirection,
-        record.AddressStreetName,
-        record.AddressStreetSuffix,
-        record.AddressPostDirection,
-        record.AddressSuiteName,
-        record.AddressSuiteNumber,
-      ].filter(Boolean).join(" ") ||
       buildStreetFromParts(record) ||
       "";
 
     if (!street) {
-      console.warn("Street not returned by Personator API.", record);
+      console.warn("Street not returned by Melissa for this record.", record);
     }
 
-    /*
-     * CITY
-     */
+    // CITY — only city keys
     const city = pickValue(record, [
       "City",
       "Locality",
@@ -479,9 +428,7 @@ function mapPersonatorRecords(response) {
       "MailingAddress.City",
     ]);
 
-    /*
-     * STATE
-     */
+    // STATE — only state keys
     const state = pickValue(record, [
       "State",
       "AdministrativeArea",
@@ -494,9 +441,7 @@ function mapPersonatorRecords(response) {
       "MailingAddress.State",
     ]);
 
-    /*
-     * ZIP — strict isolation: only zip/postal fields, never street/state/city.
-     */
+    // ZIP — only postal keys; never leaks anywhere else
     const zip = pickValue(record, [
       "PostalCode",
       "Zip",
@@ -510,12 +455,9 @@ function mapPersonatorRecords(response) {
       "MailingAddress.PostalCode",
     ]);
 
-    /*
-     * PHONE
-     */
     const phone = pickValue(record, [
-      "Phone",
       "PhoneNumber",
+      "Phone",
       "Phone_Number",
       "Phone1",
       "ParsedPhoneNumber",
@@ -526,12 +468,9 @@ function mapPersonatorRecords(response) {
       "GrpPhone.PhoneNumber",
     ]);
 
-    /*
-     * EMAIL
-     */
     const email = pickValue(record, [
-      "Email",
       "EmailAddress",
+      "Email",
       "Email_Address",
       "Email1",
       "EmailDetails.EmailAddress",
@@ -540,7 +479,7 @@ function mapPersonatorRecords(response) {
       "GrpEmail.EmailAddress",
     ]);
 
-    const personatorMappedRecord = {
+    return {
       homeAddressStreet: street || "",
       homeAddressState:  state  || "",
       homeAddressCity:   city   || "",
@@ -548,8 +487,6 @@ function mapPersonatorRecords(response) {
       phone:             phone  || "",
       email:             email  || "",
     };
-
-    return personatorMappedRecord;
   });
 }
 
@@ -603,8 +540,8 @@ function selectRecord(index) {
   if (!record) return;
 
   selectedIndex = index;
-  selectedPersonatorRecord = record;
-  console.log("Selected Personator record:", selectedPersonatorRecord);
+  selectedMelissaRecord = record;
+  console.log("Selected Melissa record:", selectedMelissaRecord);
 
   markSelectedRow(index);
   renderPreview(record);
@@ -655,9 +592,9 @@ els.filterInput.addEventListener("input", (e) => {
   const q = (e.target.value || "").trim().toLowerCase();
 
   if (!q) {
-    filteredRecords = [...personatorRecords];
+    filteredRecords = [...melissaRecords];
   } else {
-    filteredRecords = personatorRecords.filter((r) =>
+    filteredRecords = melissaRecords.filter((r) =>
       [
         r.homeAddressStreet,
         r.homeAddressState,
@@ -673,7 +610,7 @@ els.filterInput.addEventListener("input", (e) => {
   }
 
   selectedIndex = -1;
-  selectedPersonatorRecord = null;
+  selectedMelissaRecord = null;
   showPreview(false);
   refreshUpdateButton();
 
@@ -685,14 +622,14 @@ els.filterInput.addEventListener("input", (e) => {
  * =============================== */
 
 els.updateBtn.addEventListener("click", async () => {
-  if (!sdkReady || !currentLeadId || !selectedPersonatorRecord) return;
+  if (!sdkReady || !currentLeadId || !selectedMelissaRecord) return;
 
   hideBanner();
   els.updateBtn.disabled = true;
   els.updateBtn.textContent = "Updating…";
 
   try {
-    const payload = buildUpdatePayload(currentLeadId, selectedPersonatorRecord);
+    const payload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
     console.log("Zoho update payload:", payload);
 
     const updateResponse = await ZOHO.CRM.API.updateRecord({
@@ -729,9 +666,20 @@ els.updateBtn.addEventListener("click", async () => {
 /* -------------------------------------------------------------
  * BUILD UPDATE PAYLOAD
  * -------------------------------------------------------------
- * If your Zoho Address field uses compound format, set
- * ADDRESS_UPDATE_MODE = "compound". Otherwise "separate".
- * Zip is NEVER copied into Street/State/City.
+ * Two supported Zoho address layouts:
+ *
+ *   ADDRESS_UPDATE_MODE = "separate"
+ *     The Lead has four independent fields (Home_Address_Street,
+ *     Home_Address_State, Home_Address_City, Home_Address_Zip).
+ *     Use this when those fields appear separately in the Lead layout.
+ *
+ *   ADDRESS_UPDATE_MODE = "compound"
+ *     The Lead uses Zoho's compound address field. The whole address
+ *     is written as a single Home_Address object with sub-fields.
+ *     Use this when the Lead layout shows the address as a single
+ *     compound block (Street/City/State/Zip inside one field group).
+ *
+ * Zip is NEVER copied into Street/State/City in either mode.
  * ------------------------------------------------------------- */
 function buildUpdatePayload(leadId, rec) {
   if (ADDRESS_UPDATE_MODE === "compound") {
@@ -764,6 +712,9 @@ function buildUpdatePayload(leadId, rec) {
  * =============================== */
 
 function showSuccessModal() {
+  // Set the success text if the modal exposes a message element.
+  const msg = els.successModal.querySelector(".success-message, p, .modal-message");
+  if (msg) msg.textContent = "Record update successfully";
   els.successModal.classList.remove("hidden");
 }
 
