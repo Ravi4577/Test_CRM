@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Update Lead Address — Personator Consumer</title>
+
+  <!-- Zoho CRM Embedded App SDK -->
+  <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="widget-shell">
+
+    <!-- Header -->
+    <header class="widget-header">
+      <div class="title-group">
+        <h1>Personator Consumer Results</h1>
+        <p class="subtitle" id="leadContext">Loading current Lead…</p>
+      </div>
+      <div class="header-actions">
+        <input
+          type="text"
+          id="filterInput"
+          class="filter-input"
+          placeholder="Filter results (street, city, state, zip, phone, email)…"
+          disabled
+        />
+      </div>
+    </header>
+
+    <!-- Status / banner area -->
+    <div id="banner" class="banner banner-hidden"></div>
+
+    <!-- Loading state -->
+    <div id="loadingState" class="loading-state">
+      <div class="spinner"></div>
+      <p>Fetching matches from Personator Consumer…</p>
+    </div>
+
+    <!-- No data state -->
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-icon">∅</div>
+      <p>No Personator Consumer records found for this Lead.</p>
+    </div>
+
+    <!-- Results table -->
+    <div id="resultsWrapper" class="results-wrapper hidden">
+      <div class="table-scroll">
+        <table class="results-table" id="resultsTable">
+          <thead>
+            <tr>
+              <th>Home Address Street</th>
+              <th>Home Address State</th>
+              <th>Home Address City</th>
+              <th>Home Address Zip</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th class="action-col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Selected record preview -->
+    <section id="previewSection" class="preview-section hidden">
+      <h2>Selected Record Preview</h2>
+      <div class="preview-grid" id="previewGrid"></div>
+    </section>
+
+    <!-- Footer with Update button -->
+    <footer class="widget-footer">
+      <button id="cancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="updateBtn" class="btn btn-primary" type="button" disabled>
+        Update Lead
+      </button>
+    </footer>
+  </div>
+
+  <!-- Success Modal -->
+  <div id="successModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="success-check">✓</div>
+      <h3>Record update successfully</h3>
+      <button id="successCloseBtn" class="btn btn-primary" type="button">Close</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
