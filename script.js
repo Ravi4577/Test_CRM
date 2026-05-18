@@ -15,25 +15,14 @@
  * CONFIGURATION — EDIT BEFORE GO-LIVE
  * =============================== */
 
-/**
- * Personator Consumer API endpoint.
- * Default is Melissa Data's Contact Search (returns multiple records).
- *
- * If you are running through a backend proxy (RECOMMENDED for production)
- * set PERSONATOR_PROXY_URL below and the code will call your proxy instead.
- */
 const PERSONATOR_ENDPOINT =
-  "https://personator.melissadata.net/v3/WEB/ContactVerify/doContactVerify?";
+"https://personator.melissadata.net/v3/WEB/ContactVerify/doContactVerify";
 
 /**
  * Backend proxy URL (preferred). Leave empty string to call Personator directly.
  * SECURITY: Do NOT expose the API key in frontend production code.
- * Use a backend/proxy endpoint that injects the key server-side.
- *
- * Example proxy URL:
- *   const PERSONATOR_PROXY_URL = "https://yourdomain.com/api/personator-consumer";
  */
-const PERSONATOR_PROXY_URL = "https://personator.melissadata.net/v3/WEB/ContactVerify/doContactVerify?"; // <-- SET THIS for production
+const PERSONATOR_PROXY_URL = ""; // <-- SET THIS for production
 
 /**
  * TEMPORARY/TESTING ONLY — direct license key.
@@ -41,17 +30,12 @@ const PERSONATOR_PROXY_URL = "https://personator.melissadata.net/v3/WEB/ContactV
  */
 const PERSONATOR_LICENSE_KEY = "NNyQiGBQttkIhzONLxAqXx**";
 
-/**
- * Columns to request from Personator. Adjust if your subscription differs.
- */
 const PERSONATOR_COLUMNS = "GrpAddress,GrpName,GrpPhone,GrpEmail,GrpCensus,GrpAddressDetails";
 
 /**
  * Address update mode for Zoho CRM Leads:
- *   "separate"  -> uses individual API names like Home_Address_Street, Home_Address_State, ...
- *   "compound"  -> uses a single Home_Address object with Street/State/City/Zip
- *
- * Change this if your CRM uses a compound address field.
+ *   "separate" -> Home_Address_Street, Home_Address_State, ...
+ *   "compound" -> single Home_Address object with sub-fields
  */
 const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
 
@@ -62,8 +46,8 @@ const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
 let sdkReady = false;
 let currentLeadId = null;
 let currentLeadRecord = null;
-let personatorRecords = [];      // mapped records shown in the UI
-let filteredRecords = [];        // after applying filter
+let personatorRecords = [];
+let filteredRecords = [];
 let selectedPersonatorRecord = null;
 let selectedIndex = -1;
 
@@ -109,6 +93,14 @@ function showEmpty(show) {
   els.empty.classList.toggle("hidden", !show);
 }
 
+/**
+ * Update the empty-state message text without touching design.
+ */
+function setEmptyMessage(msg) {
+  const p = els.empty.querySelector("p");
+  if (p) p.textContent = msg;
+}
+
 function showResults(show) {
   els.resultsWrap.classList.toggle("hidden", !show);
 }
@@ -140,7 +132,6 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   console.log("PageLoad data:", data);
   sdkReady = true;
 
-  // Resolve current Lead ID from possible PageLoad data shapes
   if (data) {
     if (data.EntityId) {
       currentLeadId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
@@ -175,20 +166,64 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     const rawResponse = await callPersonatorAPI(params);
     console.log("Personator API raw response:", rawResponse);
 
-    // 3) Map records
-    const mapped = mapPersonatorRecords(rawResponse);
-    console.log("Mapped Personator records:", mapped);
+    // ----------------------------------------------------------
+    // Check Melissa transmission result and TotalRecords FIRST
+    // ----------------------------------------------------------
+    const trResult = String(rawResponse?.TransmissionResults || "");
+    const totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
+    const rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
 
-    personatorRecords = mapped;
-    filteredRecords = [...mapped];
+    console.log("TransmissionResults:", trResult);
+    console.log("TotalRecords:", totalRecords);
+    console.log("Raw Records count:", rawRecords.length);
 
     setLoading(false);
 
-    if (!mapped.length) {
+    // Case 1: No exact match according to Melissa
+    if (trResult.indexOf("GE02") !== -1 || totalRecords === 0) {
+      setEmptyMessage("No exact Personator match found for this Lead.");
       showEmpty(true);
       showResults(false);
       return;
     }
+
+    // 3) Map records
+    const mapped = mapPersonatorRecords(rawResponse);
+    console.log("Mapped Personator records:", mapped);
+
+    // 4) Filter to usable records (must have at least one field with a value)
+    const usableRecords = mapped.filter(
+      (r) =>
+        r.homeAddressStreet ||
+        r.homeAddressState ||
+        r.homeAddressCity ||
+        r.homeAddressZip ||
+        r.phone ||
+        r.email
+    );
+    console.log("Usable Personator records after filter:", usableRecords);
+
+    // Case 2: Records exist but none have usable data
+    if (usableRecords.length === 0) {
+      if (rawRecords.length > 0) {
+        console.log(
+          "Raw response contained records but no usable address/contact data:",
+          rawResponse
+        );
+        setEmptyMessage(
+          "Personator returned a response, but no usable address/contact data was found."
+        );
+      } else {
+        setEmptyMessage("No usable Personator Consumer data found for this Lead.");
+      }
+      showEmpty(true);
+      showResults(false);
+      return;
+    }
+
+    // 5) Render only usable records
+    personatorRecords = usableRecords;
+    filteredRecords = [...usableRecords];
 
     renderResults(filteredRecords);
     showResults(true);
@@ -229,12 +264,10 @@ async function fetchCurrentLead(leadId) {
  * =============================== */
 
 function buildPersonatorParams(lead) {
-  // Pull whatever is available on the Lead. Skip empty values.
   const fullName =
     lead.Full_Name ||
     [lead.First_Name, lead.Last_Name].filter(Boolean).join(" ").trim();
 
-  // If the Lead has compound Home_Address, prefer that; otherwise use flat fields.
   const ha = lead.Home_Address || {};
   const homeStreet = lead.Home_Address_Street || ha.Street || lead.Street || "";
   const homeCity   = lead.Home_Address_City   || ha.City   || lead.City   || "";
@@ -251,10 +284,9 @@ function buildPersonatorParams(lead) {
     postal: homeZip,
     phone:  lead.Phone  || lead.Mobile || "",
     email:  lead.Email  || "",
-    ctry:   "US", // Personator Consumer is primarily US-centric; change if needed
+    ctry:   "US",
   };
 
-  // Strip empties so the API doesn't get confused
   Object.keys(params).forEach((k) => {
     if (!params[k]) delete params[k];
   });
@@ -267,7 +299,6 @@ function buildPersonatorParams(lead) {
  * =============================== */
 
 async function callPersonatorAPI(params) {
-  // Prefer backend proxy if configured
   if (PERSONATOR_PROXY_URL) {
     const resp = await fetch(PERSONATOR_PROXY_URL, {
       method: "POST",
@@ -280,7 +311,6 @@ async function callPersonatorAPI(params) {
     return await resp.json();
   }
 
-  // Fallback: direct call (testing only)
   console.warn(
     "Calling Personator directly from frontend. Do not expose API key in production."
   );
@@ -301,17 +331,58 @@ async function callPersonatorAPI(params) {
   return await resp.json();
 }
 
-/* ===============================
- * PERSONATOR — RESPONSE MAPPING
- * -------------------------------
- * The exact field names depend on the Personator Consumer columns enabled in
- * your account. Adjust the fallbacks below to match your actual response.
- * =============================== */
+/* =====================================================================
+ * PERSONATOR — RESPONSE MAPPING (FIXED)
+ * ---------------------------------------------------------------------
+ * Handles both flat field names and nested objects.
+ * Logs the first raw record in detail so unknown field names are visible.
+ * Supports many possible key variants used across Melissa endpoints.
+ * ===================================================================== */
+
+/**
+ * Pick the first non-empty value from a list of paths. Each path may use
+ * dot-notation to walk into nested objects, e.g. "Address.City".
+ */
+function pickValue(obj, paths) {
+  for (let i = 0; i < paths.length; i++) {
+    const parts = paths[i].split(".");
+    let v = obj;
+    for (let j = 0; j < parts.length; j++) {
+      if (v === null || v === undefined) {
+        v = undefined;
+        break;
+      }
+      v = v[parts[j]];
+    }
+    if (v !== null && v !== undefined && v !== "") {
+      const out = typeof v === "string" ? v.trim() : v;
+      if (out !== "") return out;
+    }
+  }
+  return "";
+}
+
+/**
+ * Some Melissa columns split the address into parsed parts.
+ * Build a full street string from those parts as a fallback.
+ */
+function buildStreetFromParts(record) {
+  const range      = record.ParsedAddressRange     || record.AddressRange        || "";
+  const preDir     = record.ParsedAddressPreDirection || record.AddressPreDirection || "";
+  const streetName = record.ParsedStreetName       || record.AddressStreetName   || "";
+  const suffix     = record.ParsedStreetSuffix     || record.AddressSuffix       || "";
+  const postDir    = record.ParsedAddressPostDirection || "";
+  const built = [range, preDir, streetName, suffix, postDir]
+    .map((s) => (s == null ? "" : String(s).trim()))
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return built;
+}
 
 function mapPersonatorRecords(response) {
   if (!response) return [];
 
-  // Most Melissa endpoints return { Records: [...] }; some return { records: [...] }
   const records =
     response.Records ||
     response.records ||
@@ -321,44 +392,122 @@ function mapPersonatorRecords(response) {
 
   if (!Array.isArray(records)) return [];
 
+  // ---- Deep diagnostic logging on the first record ----
+  if (records[0]) {
+    console.log("FIRST RAW PERSONATOR RECORD:", records[0]);
+    console.log(
+      "FIRST RAW PERSONATOR RECORD JSON:",
+      JSON.stringify(records[0], null, 2)
+    );
+    Object.keys(records[0]).forEach((key) => {
+      console.log("PERSONATOR KEY:", key, "VALUE:", records[0][key]);
+    });
+  }
+
   return records.map((record) => {
     /*
-     * Adjust mapping here according to actual Personator Consumer API response.
-     * Each row must isolate its own value — never copy Zip into Street/State/City.
+     * STREET — flat keys, then nested objects, then parsed parts.
      */
+    const street =
+      pickValue(record, [
+        "AddressLine1",
+        "Address",
+        "DeliveryAddress",
+        "MailingAddress",
+        "Address1",
+        "AddressLine",
+        "PremisesAddress",
+        "CurrentAddress",
+        // Nested object paths
+        "Address.AddressLine1",
+        "Address.AddressLine",
+        "AddressDetails.AddressLine1",
+        "GrpAddressDetails.AddressLine1",
+        "MailingAddress.AddressLine1",
+      ]) || buildStreetFromParts(record);
+
+    /*
+     * CITY
+     */
+    const city = pickValue(record, [
+      "City",
+      "Locality",
+      "AddressCity",
+      "MailingCity",
+      "Address.City",
+      "AddressDetails.City",
+      "GrpAddressDetails.City",
+      "MailingAddress.City",
+    ]);
+
+    /*
+     * STATE
+     */
+    const state = pickValue(record, [
+      "State",
+      "AdministrativeArea",
+      "AddressState",
+      "MailingState",
+      "StateProvince",
+      "Address.State",
+      "AddressDetails.State",
+      "GrpAddressDetails.State",
+      "MailingAddress.State",
+    ]);
+
+    /*
+     * ZIP — strict isolation: only zip/postal fields, never street/state/city.
+     */
+    const zip = pickValue(record, [
+      "PostalCode",
+      "Zip",
+      "ZipCode",
+      "AddressPostalCode",
+      "MailingPostalCode",
+      "PostalCodePlus4",
+      "Address.PostalCode",
+      "AddressDetails.PostalCode",
+      "GrpAddressDetails.PostalCode",
+      "MailingAddress.PostalCode",
+    ]);
+
+    /*
+     * PHONE
+     */
+    const phone = pickValue(record, [
+      "Phone",
+      "PhoneNumber",
+      "Phone_Number",
+      "Phone1",
+      "ParsedPhoneNumber",
+      "HomePhone",
+      "PhoneDetails.PhoneNumber",
+      "ParsedPhone.PhoneNumber",
+      "GrpParsedPhone.PhoneNumber",
+      "GrpPhone.PhoneNumber",
+    ]);
+
+    /*
+     * EMAIL
+     */
+    const email = pickValue(record, [
+      "Email",
+      "EmailAddress",
+      "Email_Address",
+      "Email1",
+      "EmailDetails.EmailAddress",
+      "ParsedEmail.EmailAddress",
+      "GrpParsedEmail.EmailAddress",
+      "GrpEmail.EmailAddress",
+    ]);
+
     const personatorMappedRecord = {
-      homeAddressStreet:
-        record.AddressLine1 ||
-        record.Address ||
-        record.Home_Address_Street ||
-        record.Street ||
-        "",
-      homeAddressState:
-        record.State ||
-        record.AdministrativeArea ||
-        record.Home_Address_State ||
-        record.StateProvince ||
-        "",
-      homeAddressCity:
-        record.City ||
-        record.Locality ||
-        record.Home_Address_City ||
-        "",
-      homeAddressZip:
-        record.PostalCode ||
-        record.Zip ||
-        record.Home_Address_Zip ||
-        record.PostalCodePrimary ||
-        "",
-      phone:
-        record.PhoneNumber ||
-        record.Phone ||
-        record.HomePhone ||
-        "",
-      email:
-        record.EmailAddress ||
-        record.Email ||
-        "",
+      homeAddressStreet: street || "",
+      homeAddressState:  state  || "",
+      homeAddressCity:   city   || "",
+      homeAddressZip:    zip    || "",
+      phone:             phone  || "",
+      email:             email  || "",
     };
 
     return personatorMappedRecord;
@@ -403,7 +552,6 @@ function renderResults(records) {
     els.resultsBody.appendChild(tr);
   });
 
-  // Re-apply selected state if any
   if (selectedIndex >= 0) markSelectedRow(selectedIndex);
 }
 
@@ -427,7 +575,7 @@ function selectRecord(index) {
 
 function markSelectedRow(index) {
   const rows = els.resultsBody.querySelectorAll("tr");
-  rows.forEach((row, i) => {
+  rows.forEach((row) => {
     const isSel = parseInt(row.dataset.index, 10) === index;
     row.classList.toggle("selected", isSel);
     const btn = row.querySelector(".btn-select");
@@ -485,7 +633,6 @@ els.filterInput.addEventListener("input", (e) => {
     );
   }
 
-  // Reset selection when filtering changes the set
   selectedIndex = -1;
   selectedPersonatorRecord = null;
   showPreview(false);
@@ -531,7 +678,6 @@ els.updateBtn.addEventListener("click", async () => {
       throw new Error(reason);
     }
 
-    // Success: show modal, hide working UI
     showSuccessModal();
   } catch (err) {
     console.error("Update failed:", err);
@@ -545,15 +691,12 @@ els.updateBtn.addEventListener("click", async () => {
  * BUILD UPDATE PAYLOAD
  * -------------------------------------------------------------
  * If your Zoho Address field uses compound format, set
- * ADDRESS_UPDATE_MODE = "compound".
- * If it uses separate fields, leave it as "separate".
- * Each field maps strictly to its own value — Zip is NEVER
- * copied into Street/State/City.
+ * ADDRESS_UPDATE_MODE = "compound". Otherwise "separate".
+ * Zip is NEVER copied into Street/State/City.
  * ------------------------------------------------------------- */
 function buildUpdatePayload(leadId, rec) {
   if (ADDRESS_UPDATE_MODE === "compound") {
-    // Compound address format
-    const updateDataCompound = {
+    return {
       id: leadId,
       Home_Address: {
         Street: rec.homeAddressStreet || "",
@@ -564,11 +707,9 @@ function buildUpdatePayload(leadId, rec) {
       Phone: rec.phone || "",
       Email: rec.email || "",
     };
-    return updateDataCompound;
   }
 
-  // Separate field API names (default)
-  const updateData = {
+  return {
     id: leadId,
     Home_Address_Street: rec.homeAddressStreet || "",
     Home_Address_State:  rec.homeAddressState  || "",
@@ -577,7 +718,6 @@ function buildUpdatePayload(leadId, rec) {
     Phone:               rec.phone             || "",
     Email:               rec.email             || "",
   };
-  return updateData;
 }
 
 /* ===============================
@@ -592,12 +732,10 @@ els.successClose.addEventListener("click", closeWidget);
 els.cancelBtn.addEventListener("click", closeWidget);
 
 function closeWidget() {
-  // Close the popup/card/modal where selection/update was happening.
   try {
     ZOHO.CRM.UI.Popup.closeReload()
       .then(() => console.log("Widget closed and CRM reloaded"))
       .catch(() => {
-        // Fallback close if closeReload not available
         if (ZOHO.CRM.UI.Popup.close) ZOHO.CRM.UI.Popup.close();
       });
   } catch (e) {
