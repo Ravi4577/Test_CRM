@@ -48,10 +48,30 @@ const PERSONATOR_LICENSE_KEY = "NNyQiGBQttkIhzONLxAqXx**";
  *                 Use this if your Lead layout uses Zoho's compound
  *                 address field (one block, multiple sub-fields).
  */
-// Default to "compound" because Zoho Lead layouts that group the four
-// Home Address fields under one block use the compound Home_Address object.
-// Switch to "separate" if your layout exposes them as four independent fields.
-const ADDRESS_UPDATE_MODE = "compound"; // "compound" | "separate"
+// Zip + Phone + Email already persist with these flat names, so the Lead
+// layout uses individual fields (not the compound Home_Address object).
+// Stay on "separate" and override Street/State/City API names below if Zoho
+// turns out to use non-default labels for those three fields.
+const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
+
+/**
+ * Zoho CRM Lead field API names. Edit ONLY this block if a field doesn't
+ * update — no other code change needed; the payload is built from this map.
+ *
+ * How to confirm the right names:
+ *   1. Open the browser console after running an update.
+ *   2. Inspect the "ZOHO FIELDS METADATA" log — every Lead field is printed
+ *      with its `api_name` and human label. Find the Street/State/City rows.
+ *   3. Paste those exact `api_name` strings here.
+ */
+const FIELD_API_NAMES = {
+  street: "Home_Address_Street",
+  state:  "Home_Address_State",
+  city:   "Home_Address_City",
+  zip:    "Home_Address_Zip",
+  phone:  "Phone",
+  email:  "Email",
+};
 
 /* ===============================
  * STATE
@@ -713,6 +733,34 @@ els.updateBtn.addEventListener("click", async () => {
 
   try {
     console.log("SELECTED MELISSA RECORD:", selectedMelissaRecord);
+    console.log("STREET VALUE:", selectedMelissaRecord.homeAddressStreet);
+    console.log("STATE VALUE:",  selectedMelissaRecord.homeAddressState);
+    console.log("CITY VALUE:",   selectedMelissaRecord.homeAddressCity);
+    console.log("ZIP VALUE:",    selectedMelissaRecord.homeAddressZip);
+
+    // Best-effort: dump Lead field metadata so the correct API names for
+    // Street/State/City are discoverable from the console. Non-blocking —
+    // failure here must not break the update flow.
+    try {
+      if (ZOHO?.CRM?.META?.getFields) {
+        const fieldsMeta = await ZOHO.CRM.META.getFields({ Entity: "Leads" });
+        console.log("ZOHO FIELDS METADATA (full):", fieldsMeta);
+        const fields = fieldsMeta?.fields || fieldsMeta?.data || [];
+        const addressLike = fields.filter((f) => {
+          const blob = `${f.api_name || ""} ${f.field_label || f.display_label || ""}`.toLowerCase();
+          return blob.includes("address") || blob.includes("street") ||
+                 blob.includes("city")    || blob.includes("state")  ||
+                 blob.includes("zip")     || blob.includes("postal");
+        });
+        console.log("ZOHO ADDRESS-LIKE FIELDS:", addressLike.map((f) => ({
+          api_name: f.api_name,
+          label:    f.field_label || f.display_label,
+          data_type: f.data_type,
+        })));
+      }
+    } catch (metaErr) {
+      console.warn("Could not fetch Lead field metadata:", metaErr);
+    }
 
     const updatePayload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
     console.log("ZOHO UPDATE PAYLOAD:", updatePayload);
@@ -779,10 +827,10 @@ els.updateBtn.addEventListener("click", async () => {
 // non-empty values made it through.
 function addressFieldsPersisted(lead, rec) {
   const checks = [
-    [rec.homeAddressStreet, lead.Home_Address_Street, lead.Home_Address?.Street],
-    [rec.homeAddressCity,   lead.Home_Address_City,   lead.Home_Address?.City],
-    [rec.homeAddressState,  lead.Home_Address_State,  lead.Home_Address?.State],
-    [rec.homeAddressZip,    lead.Home_Address_Zip,    lead.Home_Address?.Zip],
+    [rec.homeAddressStreet, lead[FIELD_API_NAMES.street], lead.Home_Address?.Street],
+    [rec.homeAddressCity,   lead[FIELD_API_NAMES.city],   lead.Home_Address?.City],
+    [rec.homeAddressState,  lead[FIELD_API_NAMES.state],  lead.Home_Address?.State],
+    [rec.homeAddressZip,    lead[FIELD_API_NAMES.zip],    lead.Home_Address?.Zip],
   ];
 
   for (let i = 0; i < checks.length; i++) {
@@ -822,20 +870,21 @@ function buildUpdatePayload(leadId, rec) {
         City: rec.homeAddressCity || "",
         Zip: rec.homeAddressZip || "",
       },
-      Phone: rec.phone || "",
-      Email: rec.email || "",
+      [FIELD_API_NAMES.phone]: rec.phone || "",
+      [FIELD_API_NAMES.email]: rec.email || "",
     };
   }
 
-  return {
-    id: leadId,
-    Home_Address_Street: rec.homeAddressStreet || "",
-    Home_Address_State: rec.homeAddressState || "",
-    Home_Address_City: rec.homeAddressCity || "",
-    Home_Address_Zip: rec.homeAddressZip || "",
-    Phone: rec.phone || "",
-    Email: rec.email || "",
-  };
+  // Separate-fields mode — payload assembled from FIELD_API_NAMES so the
+  // mapping is editable in one place. Zip stays isolated from Street/State/City.
+  const updatePayload = { id: leadId };
+  updatePayload[FIELD_API_NAMES.street] = rec.homeAddressStreet || "";
+  updatePayload[FIELD_API_NAMES.state]  = rec.homeAddressState  || "";
+  updatePayload[FIELD_API_NAMES.city]   = rec.homeAddressCity   || "";
+  updatePayload[FIELD_API_NAMES.zip]    = rec.homeAddressZip    || "";
+  updatePayload[FIELD_API_NAMES.phone]  = rec.phone             || "";
+  updatePayload[FIELD_API_NAMES.email]  = rec.email             || "";
+  return updatePayload;
 }
 
 /* ===============================
