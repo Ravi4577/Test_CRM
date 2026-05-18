@@ -558,37 +558,24 @@ function mapMelissaRecords(records) {
         "MailingAddress.PostalCode",
       ]);
 
-    const phone = extractContact(
-      Array.isArray(record.PhoneRecords) ? record.PhoneRecords[0] : null,
-      ["PhoneNumber", "Phone", "Phone_Number", "Number", "ParsedPhoneNumber"]
-    ) ||
-      pickValue(record, [
-        "PhoneNumber",
-        "Phone",
-        "Phone_Number",
-        "Phone1",
-        "ParsedPhoneNumber",
-        "HomePhone",
-        "PhoneDetails.PhoneNumber",
-        "ParsedPhone.PhoneNumber",
-        "GrpParsedPhone.PhoneNumber",
-        "GrpPhone.PhoneNumber",
-      ]);
+    console.log("PhoneRecords:", record.PhoneRecords);
+    console.log("EmailRecords:", record.EmailRecords);
 
-    const email = extractContact(
-      Array.isArray(record.EmailRecords) ? record.EmailRecords[0] : null,
-      ["EmailAddress", "Email", "Email_Address", "Address"]
-    ) ||
-      pickValue(record, [
-        "EmailAddress",
-        "Email",
-        "Email_Address",
-        "Email1",
-        "EmailDetails.EmailAddress",
-        "ParsedEmail.EmailAddress",
-        "GrpParsedEmail.EmailAddress",
-        "GrpEmail.EmailAddress",
-      ]);
+    const phone =
+      record.PhoneRecords?.[0]?.PhoneNumber ||
+      record.PhoneRecords?.[0]?.phoneNumber ||
+      record.PhoneRecords?.[0]?.Phone ||
+      record.PhoneNumber ||
+      record.Phone ||
+      "";
+
+    const email =
+      record.EmailRecords?.[0]?.Email ||
+      record.EmailRecords?.[0]?.email ||
+      record.EmailRecords?.[0]?.EmailAddress ||
+      record.EmailAddress ||
+      record.Email ||
+      "";
 
     return {
       homeAddressStreet: toDisplayString(street),
