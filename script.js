@@ -367,17 +367,19 @@ function pickValue(obj, paths) {
  * Build a full street string from those parts as a fallback.
  */
 function buildStreetFromParts(record) {
-  const range      = record.ParsedAddressRange     || record.AddressRange        || "";
-  const preDir     = record.ParsedAddressPreDirection || record.AddressPreDirection || "";
-  const streetName = record.ParsedStreetName       || record.AddressStreetName   || "";
-  const suffix     = record.ParsedStreetSuffix     || record.AddressSuffix       || "";
-  const postDir    = record.ParsedAddressPostDirection || "";
-  const built = [range, preDir, streetName, suffix, postDir]
+  return [
+    record.AddressHouseNumber     || record.ParsedAddressRange         || record.AddressRange,
+    record.AddressPreDirection    || record.ParsedAddressPreDirection,
+    record.AddressStreetName      || record.ParsedStreetName,
+    record.AddressStreetSuffix    || record.ParsedStreetSuffix         || record.AddressSuffix,
+    record.AddressPostDirection   || record.ParsedAddressPostDirection,
+    record.AddressSuiteName,
+    record.AddressSuiteNumber,
+  ]
     .map((s) => (s == null ? "" : String(s).trim()))
     .filter(Boolean)
     .join(" ")
     .trim();
-  return built;
 }
 
 function mapPersonatorRecords(response) {
@@ -394,11 +396,7 @@ function mapPersonatorRecords(response) {
 
   // ---- Deep diagnostic logging on the first record ----
   if (records[0]) {
-    console.log("FIRST RAW PERSONATOR RECORD:", records[0]);
-    console.log(
-      "FIRST RAW PERSONATOR RECORD JSON:",
-      JSON.stringify(records[0], null, 2)
-    );
+    console.log("FIRST RAW PERSONATOR RECORD:", JSON.stringify(records[0], null, 2));
     Object.keys(records[0]).forEach((key) => {
       console.log("PERSONATOR KEY:", key, "VALUE:", records[0][key]);
     });
@@ -406,25 +404,38 @@ function mapPersonatorRecords(response) {
 
   return records.map((record) => {
     /*
-     * STREET — flat keys, then nested objects, then parsed parts.
+     * STREET — try every known Personator/Melissa street key, then fall back
+     * to parsed address parts. Never falls through to ZIP/State/City.
      */
     const street =
+      record.AddressLine1 ||
+      record.DeliveryAddress ||
+      record.Address ||
+      record.Address1 ||
+      record.StreetAddress ||
+      record.Street ||
+      record.MailingAddress ||
+      record.PremisesAddress ||
+      record.AddressLine ||
+      record.CurrentAddress ||
       pickValue(record, [
-        "AddressLine1",
-        "Address",
-        "DeliveryAddress",
-        "MailingAddress",
-        "Address1",
-        "AddressLine",
-        "PremisesAddress",
-        "CurrentAddress",
-        // Nested object paths
         "Address.AddressLine1",
         "Address.AddressLine",
         "AddressDetails.AddressLine1",
         "GrpAddressDetails.AddressLine1",
         "MailingAddress.AddressLine1",
-      ]) || buildStreetFromParts(record);
+      ]) ||
+      [
+        record.AddressHouseNumber,
+        record.AddressPreDirection,
+        record.AddressStreetName,
+        record.AddressStreetSuffix,
+        record.AddressPostDirection,
+        record.AddressSuiteName,
+        record.AddressSuiteNumber,
+      ].filter(Boolean).join(" ") ||
+      buildStreetFromParts(record) ||
+      "";
 
     /*
      * CITY
