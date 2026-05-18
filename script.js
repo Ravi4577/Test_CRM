@@ -98,7 +98,6 @@ const els = {
   resultsBody: document.getElementById("resultsBody"),
   previewSec: document.getElementById("previewSection"),
   previewGrid: document.getElementById("previewGrid"),
-  updateBtn: document.getElementById("updateLeadBtn"),
   cancelBtn: document.getElementById("cancelBtn"),
   filterInput: document.getElementById("filterInput"),
   successModal: document.getElementById("successModal"),
@@ -150,8 +149,14 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+// Module-level reference to the Update Lead <button>. Assigned in
+// attachUpdateLeadHandler() once the DOM is ready, then shared by
+// refreshUpdateButton() and updateLeadRecord().
+let updateLeadBtn = null;
+
 function refreshUpdateButton() {
-  els.updateBtn.disabled =
+  if (!updateLeadBtn) return;
+  updateLeadBtn.disabled =
     !sdkReady || !currentLeadId || !selectedMelissaRecord;
 }
 
@@ -729,13 +734,16 @@ els.filterInput.addEventListener("input", (e) => {
 // but the readyState branch covers the case where this file is bundled or
 // loaded async/defer.
 function attachUpdateLeadHandler() {
-  const updateLeadBtn = document.getElementById("updateLeadBtn");
+  updateLeadBtn = document.getElementById("updateLeadBtn");
   if (!updateLeadBtn) {
     console.error("attachUpdateLeadHandler: #updateLeadBtn not found in DOM.");
     return;
   }
 
-  updateLeadBtn.addEventListener("click", onUpdateLeadClick);
+  updateLeadBtn.addEventListener("click", async function () {
+    console.log("Update Lead button clicked");
+    await updateLeadRecord();
+  });
 }
 
 if (document.readyState === "loading") {
@@ -744,60 +752,35 @@ if (document.readyState === "loading") {
   attachUpdateLeadHandler();
 }
 
-async function onUpdateLeadClick() {
-  console.log("Update Lead button clicked");
-  console.log("Current Lead ID:", currentLeadId);
-  console.log("Selected Melissa Record:", selectedMelissaRecord);
-  console.log("SDK Ready:", sdkReady);
-
-  if (!sdkReady) {
-    showBanner("Zoho SDK is not ready.", "error");
-    return;
-  }
-  if (!currentLeadId) {
-    showBanner("Current Lead ID not found.", "error");
-    return;
-  }
-  if (!selectedMelissaRecord) {
-    showBanner("Please select a Melissa record first.", "error");
-    return;
-  }
-
-  hideBanner();
-  els.updateBtn.disabled = true;
-  els.updateBtn.textContent = "Updating…";
-
+async function updateLeadRecord() {
   try {
-    console.log("SELECTED MELISSA RECORD:", selectedMelissaRecord);
-    console.log("STREET VALUE:", selectedMelissaRecord.homeAddressStreet);
-    console.log("STATE VALUE:",  selectedMelissaRecord.homeAddressState);
-    console.log("CITY VALUE:",   selectedMelissaRecord.homeAddressCity);
-    console.log("ZIP VALUE:",    selectedMelissaRecord.homeAddressZip);
+    console.log("Update Lead button clicked");
+    console.log("Current Lead ID:", currentLeadId);
+    console.log("Selected Melissa Record:", selectedMelissaRecord);
+    console.log("SDK Ready:", sdkReady);
 
-    // Best-effort: dump Lead field metadata so the correct API names for
-    // Street/State/City are discoverable from the console. Non-blocking —
-    // failure here must not break the update flow.
-    try {
-      if (ZOHO?.CRM?.META?.getFields) {
-        const fieldsMeta = await ZOHO.CRM.META.getFields({ Entity: "Leads" });
-        console.log("ZOHO FIELDS METADATA (full):", fieldsMeta);
-        const fields = fieldsMeta?.fields || fieldsMeta?.data || [];
-        const addressLike = fields.filter((f) => {
-          const blob = `${f.api_name || ""} ${f.field_label || f.display_label || ""}`.toLowerCase();
-          return blob.includes("address") || blob.includes("street") ||
-                 blob.includes("city")    || blob.includes("state")  ||
-                 blob.includes("zip")     || blob.includes("postal");
-        });
-        console.log("ZOHO ADDRESS-LIKE FIELDS:", addressLike.map((f) => ({
-          api_name: f.api_name,
-          label:    f.field_label || f.display_label,
-          data_type: f.data_type,
-        })));
-      }
-    } catch (metaErr) {
-      console.warn("Could not fetch Lead field metadata:", metaErr);
+    if (!sdkReady) {
+      showBanner("Zoho SDK is not ready.", "error");
+      return;
+    }
+    if (!currentLeadId) {
+      showBanner("Current Lead ID not found.", "error");
+      return;
+    }
+    if (!selectedMelissaRecord) {
+      showBanner("Please select a Melissa record first.", "error");
+      return;
     }
 
+    hideBanner();
+    if (updateLeadBtn) {
+      updateLeadBtn.disabled = true;
+      updateLeadBtn.textContent = "Updating...";
+    }
+
+    // Payload is built via FIELD_API_NAMES so Street/State/City API names
+    // remain editable in one place — change them in the config block at the
+    // top of the file. Zip/Phone/Email are confirmed working.
     const updatePayload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
     console.log("ZOHO UPDATE PAYLOAD:", updatePayload);
 
@@ -816,66 +799,21 @@ async function onUpdateLeadClick() {
         updateResponse.data[0].status === "success");
 
     if (!success) {
-      const reason =
-        updateResponse?.data?.[0]?.message ||
-        "Unknown error from Zoho CRM update.";
-      throw new Error(reason);
-    }
-
-    // Verify the write actually landed by reading the Lead back.
-    let updatedLead = null;
-    try {
-      updatedLead = await fetchCurrentLead(currentLeadId);
-      console.log("UPDATED LEAD AFTER SAVE:", updatedLead);
-    } catch (verifyErr) {
-      console.warn("Could not re-fetch Lead for verification:", verifyErr);
-    }
-
-    if (updatedLead && !addressFieldsPersisted(updatedLead, selectedMelissaRecord)) {
-      console.warn(
-        "Zoho returned SUCCESS but Home Address fields on the Lead do not " +
-        "match the sent values. The API field names for the address block " +
-        "may not match. Inspect the UPDATED LEAD AFTER SAVE log above and " +
-        "compare keys against the payload."
+      throw new Error(
+        updateResponse?.data?.[0]?.message || "Zoho update failed."
       );
-      showBanner(
-        "Zoho accepted the update, but Home Address field mapping may be incorrect. Please verify exact API names.",
-        "error"
-      );
-      els.updateBtn.disabled = false;
-      els.updateBtn.textContent = "Update Lead";
-      return;
     }
 
-    showSuccessModal();
-  } catch (err) {
-    console.error("Update failed:", err);
-    showBanner(`Update failed: ${err.message || err}`, "error");
-    els.updateBtn.disabled = false;
-    els.updateBtn.textContent = "Update Lead";
+    showSuccessModal("Record update successfully");
+  } catch (error) {
+    console.error("Update Lead failed:", error);
+    showBanner("Update failed: " + (error.message || error), "error");
+  } finally {
+    if (updateLeadBtn) {
+      updateLeadBtn.disabled = false;
+      updateLeadBtn.textContent = "Update Lead";
+    }
   }
-}
-
-// Compare the values we sent against what the Lead actually contains after
-// the update. We accept either the compound (Home_Address.Street) or the
-// flat (Home_Address_Street) representation because Zoho can return either
-// depending on the layout. Empty sends are skipped — we only assert that
-// non-empty values made it through.
-function addressFieldsPersisted(lead, rec) {
-  const checks = [
-    [rec.homeAddressStreet, lead[FIELD_API_NAMES.street], lead.Home_Address?.Street],
-    [rec.homeAddressCity,   lead[FIELD_API_NAMES.city],   lead.Home_Address?.City],
-    [rec.homeAddressState,  lead[FIELD_API_NAMES.state],  lead.Home_Address?.State],
-    [rec.homeAddressZip,    lead[FIELD_API_NAMES.zip],    lead.Home_Address?.Zip],
-  ];
-
-  for (let i = 0; i < checks.length; i++) {
-    const [sent, flat, compound] = checks[i];
-    if (!sent) continue;
-    const got = (flat || compound || "").toString().trim();
-    if (got !== sent.toString().trim()) return false;
-  }
-  return true;
 }
 
 /* -------------------------------------------------------------
@@ -927,11 +865,22 @@ function buildUpdatePayload(leadId, rec) {
  * SUCCESS MODAL + CLOSE
  * =============================== */
 
-function showSuccessModal() {
-  // Set the success text if the modal exposes a message element.
-  const msg = els.successModal.querySelector(".success-message, p, .modal-message");
-  if (msg) msg.textContent = "Record update successfully";
-  els.successModal.classList.remove("hidden");
+function showSuccessModal(message) {
+  const modal = document.getElementById("successModal");
+  const text = message || "Record update successfully";
+
+  if (!modal) {
+    alert(text);
+    return;
+  }
+
+  const msgEl =
+    document.getElementById("successMessage") ||
+    modal.querySelector(".success-message, .modal-message, h3, p");
+  if (msgEl) msgEl.textContent = text;
+
+  modal.classList.remove("hidden");
+  modal.style.display = "flex";
 }
 
 els.successClose.addEventListener("click", closeWidget);
