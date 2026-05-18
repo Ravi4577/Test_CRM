@@ -48,7 +48,10 @@ const PERSONATOR_LICENSE_KEY = "NNyQiGBQttkIhzONLxAqXx**";
  *                 Use this if your Lead layout uses Zoho's compound
  *                 address field (one block, multiple sub-fields).
  */
-const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
+// Default to "compound" because Zoho Lead layouts that group the four
+// Home Address fields under one block use the compound Home_Address object.
+// Switch to "separate" if your layout exposes them as four independent fields.
+const ADDRESS_UPDATE_MODE = "compound"; // "compound" | "separate"
 
 /* ===============================
  * STATE
@@ -709,16 +712,17 @@ els.updateBtn.addEventListener("click", async () => {
   els.updateBtn.textContent = "Updating…";
 
   try {
-    const payload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
-    console.log("Zoho update payload:", payload);
+    console.log("SELECTED MELISSA RECORD:", selectedMelissaRecord);
+
+    const updatePayload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
+    console.log("ZOHO UPDATE PAYLOAD:", updatePayload);
 
     const updateResponse = await ZOHO.CRM.API.updateRecord({
       Entity: "Leads",
-      APIData: payload,
-      Trigger: ["workflow"],
+      APIData: updatePayload,
     });
 
-    console.log("Zoho update response:", updateResponse);
+    console.log("ZOHO UPDATE RESPONSE:", updateResponse);
 
     const success =
       updateResponse &&
@@ -734,6 +738,31 @@ els.updateBtn.addEventListener("click", async () => {
       throw new Error(reason);
     }
 
+    // Verify the write actually landed by reading the Lead back.
+    let updatedLead = null;
+    try {
+      updatedLead = await fetchCurrentLead(currentLeadId);
+      console.log("UPDATED LEAD AFTER SAVE:", updatedLead);
+    } catch (verifyErr) {
+      console.warn("Could not re-fetch Lead for verification:", verifyErr);
+    }
+
+    if (updatedLead && !addressFieldsPersisted(updatedLead, selectedMelissaRecord)) {
+      console.warn(
+        "Zoho returned SUCCESS but Home Address fields on the Lead do not " +
+        "match the sent values. The API field names for the address block " +
+        "may not match. Inspect the UPDATED LEAD AFTER SAVE log above and " +
+        "compare keys against the payload."
+      );
+      showBanner(
+        "Zoho accepted the update, but Home Address field mapping may be incorrect. Please verify exact API names.",
+        "error"
+      );
+      els.updateBtn.disabled = false;
+      els.updateBtn.textContent = "Update Lead";
+      return;
+    }
+
     showSuccessModal();
   } catch (err) {
     console.error("Update failed:", err);
@@ -742,6 +771,28 @@ els.updateBtn.addEventListener("click", async () => {
     els.updateBtn.textContent = "Update Lead";
   }
 });
+
+// Compare the values we sent against what the Lead actually contains after
+// the update. We accept either the compound (Home_Address.Street) or the
+// flat (Home_Address_Street) representation because Zoho can return either
+// depending on the layout. Empty sends are skipped — we only assert that
+// non-empty values made it through.
+function addressFieldsPersisted(lead, rec) {
+  const checks = [
+    [rec.homeAddressStreet, lead.Home_Address_Street, lead.Home_Address?.Street],
+    [rec.homeAddressCity,   lead.Home_Address_City,   lead.Home_Address?.City],
+    [rec.homeAddressState,  lead.Home_Address_State,  lead.Home_Address?.State],
+    [rec.homeAddressZip,    lead.Home_Address_Zip,    lead.Home_Address?.Zip],
+  ];
+
+  for (let i = 0; i < checks.length; i++) {
+    const [sent, flat, compound] = checks[i];
+    if (!sent) continue;
+    const got = (flat || compound || "").toString().trim();
+    if (got !== sent.toString().trim()) return false;
+  }
+  return true;
+}
 
 /* -------------------------------------------------------------
  * BUILD UPDATE PAYLOAD
