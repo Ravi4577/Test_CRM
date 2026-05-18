@@ -155,16 +155,17 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   els.leadContext.textContent = `Current Lead ID: ${currentLeadId}`;
 
   try {
-    // 1) Fetch current Lead
+    // 1) Fetch current Lead — used ONLY as input parameters for Personator
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
-    console.log("Current Lead Data:", currentLeadRecord);
+    console.log("Current Zoho Lead used only for search:", currentLeadRecord);
 
-    // 2) Call Personator Consumer API using Lead data
+    // 2) Call Personator Consumer API using Lead data as input
     const params = buildPersonatorParams(currentLeadRecord);
     console.log("Personator API request params:", params);
 
     const rawResponse = await callPersonatorAPI(params);
-    console.log("Personator API raw response:", rawResponse);
+    console.log("Personator raw response:", rawResponse);
+    console.log("Personator records only:", rawResponse?.Records);
 
     // ----------------------------------------------------------
     // Check Melissa transmission result and TotalRecords FIRST
@@ -334,6 +335,12 @@ async function callPersonatorAPI(params) {
 /* =====================================================================
  * PERSONATOR — RESPONSE MAPPING (FIXED)
  * ---------------------------------------------------------------------
+ * IMPORTANT: This mapper reads ONLY from response.Records (the Personator
+ * API result). It never references currentLeadRecord or any Zoho lead
+ * field. If the rendered rows look identical to the lead, that is because
+ * Personator echoed the verified input back — not because lead data
+ * leaked into the table.
+ *
  * Handles both flat field names and nested objects.
  * Logs the first raw record in detail so unknown field names are visible.
  * Supports many possible key variants used across Melissa endpoints.
@@ -455,7 +462,7 @@ function mapPersonatorRecords(response) {
       "";
 
     if (!street) {
-      console.warn("Street value not returned by Personator API.", record);
+      console.warn("Street not returned by Personator API.", record);
     }
 
     /*
