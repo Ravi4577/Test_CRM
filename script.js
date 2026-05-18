@@ -65,9 +65,9 @@ const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
  *   3. Paste those exact `api_name` strings here.
  */
 const FIELD_API_NAMES = {
-  street: "Home_Address_Street",
-  state:  "Home_Address_State",
-  city:   "Home_Address_City",
+  street: "LOCATION_ADDRESS",
+  state:  "LOCATION_ADDRESS_STATE",
+  city:   "LOCATION_ADDRESS_CITY",
   zip:    "Home_Address_Zip",
   phone:  "Phone",
   email:  "Email",
