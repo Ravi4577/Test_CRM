@@ -396,9 +396,22 @@ function mapPersonatorRecords(response) {
 
   // ---- Deep diagnostic logging on the first record ----
   if (records[0]) {
-    console.log("FIRST RAW PERSONATOR RECORD:", JSON.stringify(records[0], null, 2));
+    console.log("FIRST RAW PERSONATOR RECORD JSON:", JSON.stringify(records[0], null, 2));
     Object.keys(records[0]).forEach((key) => {
       console.log("PERSONATOR KEY:", key, "VALUE:", records[0][key]);
+    });
+    // Highlight any keys that could plausibly carry the street value
+    Object.keys(records[0]).forEach((key) => {
+      const lower = key.toLowerCase();
+      if (
+        lower.includes("address") ||
+        lower.includes("street") ||
+        lower.includes("delivery") ||
+        lower.includes("mailing") ||
+        lower.includes("premise")
+      ) {
+        console.log("POSSIBLE STREET KEY:", key, records[0][key]);
+      }
     });
   }
 
@@ -406,6 +419,7 @@ function mapPersonatorRecords(response) {
     /*
      * STREET — try every known Personator/Melissa street key, then fall back
      * to parsed address parts. Never falls through to ZIP/State/City.
+     * (Plus4 deliberately excluded — it is the ZIP+4 extension, not street.)
      */
     const street =
       record.AddressLine1 ||
@@ -416,6 +430,9 @@ function mapPersonatorRecords(response) {
       record.Street ||
       record.MailingAddress ||
       record.PremisesAddress ||
+      record.PremiseAddress ||
+      record.AddressDeliveryLine ||
+      record.DeliveryLine ||
       record.AddressLine ||
       record.CurrentAddress ||
       pickValue(record, [
@@ -436,6 +453,10 @@ function mapPersonatorRecords(response) {
       ].filter(Boolean).join(" ") ||
       buildStreetFromParts(record) ||
       "";
+
+    if (!street) {
+      console.warn("Street value not returned by Personator API.", record);
+    }
 
     /*
      * CITY
