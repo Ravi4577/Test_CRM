@@ -205,12 +205,12 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
      * returns zero records, progressively drop fields to broaden the match.
      * As soon as any attempt returns records, stop.
      */
+    // The strict UI filter requires First + Last + Zip to match every row, so
+    // there is no point widening the API search beyond those three fields —
+    // any extra rows would just be discarded by the filter.
     const attempts = [
-      { label: "first + last + state + city + postal", params: baseParams },
-      { label: "first + last + state",                 params: { first: baseParams.first, last: baseParams.last, state: baseParams.state } },
-      { label: "first + last",                         params: { first: baseParams.first, last: baseParams.last } },
-      { label: "last + state",                         params: { last:  baseParams.last,  state: baseParams.state } },
-      { label: "state only",                           params: { state: baseParams.state } },
+      { label: "first + last + postal", params: baseParams },
+      { label: "first + last",          params: { first: baseParams.first, last: baseParams.last } },
     ];
 
     let rawResponse = null;
@@ -273,32 +273,64 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     }
 
     // 4) Map ONLY from Melissa response.Records (never from lead)
-    const mapped = mapMelissaRecords(rawRecords);
-    console.log("Mapped Melissa records:", mapped);
+    const flattenedMelissaRows = mapMelissaRecords(rawRecords);
+    console.log("Flattened Melissa rows before strict filter:", flattenedMelissaRows);
 
+    // 5) Strict filter — only keep rows where First Name + Last Name + Zip
+    //    all match the currently opened Lead.
+    const leadFirstName = normalizeName(currentLeadRecord.First_Name);
+    const leadLastName  = normalizeName(currentLeadRecord.Last_Name);
+    const leadZip       = normalizeZip(currentLeadRecord.Home_Address_Zip);
 
-    // 5) Filter to rows that actually have at least one usable value
-    const usableRecords = mapped.filter(
-      (r) =>
-        r.homeAddressStreet ||
-        r.homeAddressState ||
-        r.homeAddressCity ||
-        r.homeAddressZip ||
-        r.phone ||
-        r.email
-    );
-    console.log("Usable Melissa records:", usableRecords);
+    console.log("Lead First Name:", leadFirstName);
+    console.log("Lead Last Name:", leadLastName);
+    console.log("Lead Zip:", leadZip);
 
-    if (usableRecords.length === 0) {
-      setEmptyMessage("No Melissa Search records found after broad search.");
+    const strictlyFilteredRecords = flattenedMelissaRows.filter((record) => {
+      const recordFirstName = normalizeName(record.firstName);
+      const recordLastName  = normalizeName(record.lastName);
+      const recordZip       = normalizeZip(record.homeAddressZip);
+
+      const firstNameMatch = recordFirstName === leadFirstName;
+      const lastNameMatch  = recordLastName  === leadLastName;
+      const zipMatch       = recordZip       === leadZip;
+
+      console.log("Compare:", {
+        leadFirstName,
+        recordFirstName,
+        firstNameMatch,
+        leadLastName,
+        recordLastName,
+        lastNameMatch,
+        leadZip,
+        recordZip,
+        zipMatch,
+      });
+
+      return (
+        leadFirstName &&
+        leadLastName &&
+        leadZip &&
+        firstNameMatch &&
+        lastNameMatch &&
+        zipMatch
+      );
+    });
+
+    console.log("Filtered records with first + last + zip match:", strictlyFilteredRecords);
+
+    if (strictlyFilteredRecords.length === 0) {
+      setEmptyMessage(
+        "No Melissa records found where First Name, Last Name, and Home Address Zip match this Lead."
+      );
       showEmpty(true);
       showResults(false);
       return;
     }
 
     // 6) Render
-    melissaRecords = usableRecords;
-    filteredRecords = [...usableRecords];
+    melissaRecords  = strictlyFilteredRecords;
+    filteredRecords = [...strictlyFilteredRecords];
 
     renderResults(filteredRecords);
     showResults(true);
@@ -357,15 +389,23 @@ async function fetchCurrentLead(leadId) {
  * =============================== */
 
 function buildMelissaSearchParams(lead) {
-  const ha = lead.Home_Address || {};
-
   return {
     first: lead.First_Name || "",
     last: lead.Last_Name || "",
-    city: lead.Home_Address_City || ha.City || lead.City || "",
-    state: lead.Home_Address_State || ha.State || lead.State || "",
-    postal: lead.Home_Address_Zip || ha.Zip || lead.Zip_Code || "",
+    postal: lead.Home_Address_Zip || "",
   };
+}
+
+/* ===============================
+ * NORMALIZATION HELPERS — used for strict First + Last + Zip matching.
+ * =============================== */
+
+function normalizeName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeZip(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 5);
 }
 
 /* ===============================
@@ -561,10 +601,25 @@ function mapMelissaRecords(records) {
   const rows = [];
 
   records.forEach((record) => {
-    // Phone/email live at the PARENT record level — extract once and attach
-    // to every address row produced from this record.
+    // Identity, phone, email live at the PARENT record level — extract once
+    // and attach to every address row produced from this record so the strict
+    // First + Last + Zip filter has firstName/lastName on every flattened row.
     console.log("Parent PhoneRecords:", record.PhoneRecords);
     console.log("Parent EmailRecords:", record.EmailRecords);
+
+    const firstName =
+      record.Name?.FirstName ||
+      record.FirstName ||
+      record.First_Name ||
+      record.First ||
+      "";
+
+    const lastName =
+      record.Name?.LastName ||
+      record.LastName ||
+      record.Last_Name ||
+      record.Last ||
+      "";
 
     const phone =
       record.PhoneRecords?.[0]?.PhoneNumber ||
@@ -582,10 +637,13 @@ function mapMelissaRecords(records) {
       record.Email ||
       "";
 
+    console.log("Extracted firstName:", firstName, "lastName:", lastName);
     console.log("Extracted phone:", phone);
     console.log("Extracted email:", email);
 
     const buildRow = (addr) => ({
+      firstName: toDisplayString(firstName),
+      lastName: toDisplayString(lastName),
       homeAddressStreet: toDisplayString(
         addr?.AddressLine1 || addr?.AddressLine || addr?.Address || addr?.Street || ""
       ),
@@ -642,6 +700,8 @@ function mapMelissaRecords(records) {
       ]);
 
       rows.push({
+        firstName: toDisplayString(firstName),
+        lastName: toDisplayString(lastName),
         homeAddressStreet: toDisplayString(street),
         homeAddressState: toDisplayString(state),
         homeAddressCity: toDisplayString(city),
@@ -677,6 +737,8 @@ function renderResults(records) {
     tr.dataset.index = index;
 
     tr.innerHTML = `
+      <td>${escapeHtml(rec.firstName) || "—"}</td>
+      <td>${escapeHtml(rec.lastName) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressStreet) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressState) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressCity) || "—"}</td>
@@ -730,6 +792,8 @@ function markSelectedRow(index) {
 
 function renderPreview(rec) {
   const fields = [
+    ["First Name", rec.firstName],
+    ["Last Name", rec.lastName],
     ["Home Address Street", rec.homeAddressStreet],
     ["Home Address State", rec.homeAddressState],
     ["Home Address City", rec.homeAddressCity],
@@ -762,6 +826,8 @@ els.filterInput.addEventListener("input", (e) => {
   } else {
     filteredRecords = melissaRecords.filter((r) =>
       [
+        r.firstName,
+        r.lastName,
         r.homeAddressStreet,
         r.homeAddressState,
         r.homeAddressCity,
