@@ -282,6 +282,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     const leadLastName  = normalizeName(currentLeadRecord.Last_Name);
     const leadZip       = normalizeZip(currentLeadRecord.Home_Address_Zip);
 
+    console.log("STRICT FILTER ACTIVE: first + last + zip");
     console.log("Lead First Name:", leadFirstName);
     console.log("Lead Last Name:", leadLastName);
     console.log("Lead Zip:", leadZip);
