@@ -274,20 +274,21 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
     // 4) Map ONLY from Melissa response.Records (never from lead)
     const flattenedMelissaRows = mapMelissaRecords(rawRecords);
-    console.log("Flattened Melissa rows before strict filter:", flattenedMelissaRows);
+    console.log("Flattened Melissa rows before filter:", flattenedMelissaRows);
 
-    // 5) Strict filter — only keep rows where First Name + Last Name + Zip
-    //    all match the currently opened Lead.
+    // 5) Filter — keep a row if EITHER both First+Last match the Lead,
+    //    OR the Home Address Zip matches the Lead. A row missing on name
+    //    but matching on zip still shows, and vice versa.
     const leadFirstName = normalizeName(currentLeadRecord.First_Name);
     const leadLastName  = normalizeName(currentLeadRecord.Last_Name);
     const leadZip       = normalizeZip(currentLeadRecord.Home_Address_Zip);
 
-    console.log("STRICT FILTER ACTIVE: first + last + zip");
+    console.log("FILTER ACTIVE: (First Name AND Last Name) OR ZIP");
     console.log("Lead First Name:", leadFirstName);
     console.log("Lead Last Name:", leadLastName);
     console.log("Lead Zip:", leadZip);
 
-    const strictlyFilteredRecords = flattenedMelissaRows.filter((record) => {
+    const matchedRecords = flattenedMelissaRows.filter((record) => {
       const recordFirstName = normalizeName(record.firstName);
       const recordLastName  = normalizeName(record.lastName);
       const recordZip       = normalizeZip(record.homeAddressZip);
@@ -309,20 +310,16 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       });
 
       return (
-        leadFirstName &&
-        leadLastName &&
-        leadZip &&
-        firstNameMatch &&
-        lastNameMatch &&
-        zipMatch
+        (leadFirstName && leadLastName && firstNameMatch && lastNameMatch) ||
+        (leadZip && zipMatch)
       );
     });
 
-    console.log("Filtered records with first + last + zip match:", strictlyFilteredRecords);
+    console.log("Filtered records — (First+Last) OR Zip match:", matchedRecords);
 
-    if (strictlyFilteredRecords.length === 0) {
+    if (matchedRecords.length === 0) {
       setEmptyMessage(
-        "No Melissa records found where First Name, Last Name, and Home Address Zip match this Lead."
+        "No Melissa records found matching: (First Name AND Last Name) OR Home Address Zip."
       );
       showEmpty(true);
       showResults(false);
@@ -330,8 +327,8 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     }
 
     // 6) Render
-    melissaRecords  = strictlyFilteredRecords;
-    filteredRecords = [...strictlyFilteredRecords];
+    melissaRecords  = matchedRecords;
+    filteredRecords = [...matchedRecords];
 
     renderResults(filteredRecords);
     showResults(true);
