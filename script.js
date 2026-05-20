@@ -717,6 +717,16 @@ function mapMelissaRecords(records) {
 
   console.log("FIRST RAW MELISSA RECORD:", JSON.stringify(records[0], null, 2));
 
+  // Phone/Email rows are labeled by comparing to the *currently opened Lead*
+  // — not by Melissa's own current/previous tags. Compute the normalized
+  // reference once per render.
+  const leadPhone = normalizePhone(
+    currentLeadRecord?.Phone || currentLeadRecord?.Mobile || ""
+  );
+  const leadEmail = normalizeEmail(currentLeadRecord?.Email || "");
+  console.log("Lead phone for comparison:", leadPhone);
+  console.log("Lead email for comparison:", leadEmail);
+
   const rows = [];
 
   records.forEach((record) => {
@@ -781,23 +791,29 @@ function mapMelissaRecords(records) {
     });
 
     (record.PhoneRecords || []).forEach((entry) => {
-      const phone = typeof entry === "string"
+      const phoneValue = typeof entry === "string"
         ? entry
         : entry?.PhoneNumber || entry?.phoneNumber || entry?.Phone || "";
-      const phoneStr = toDisplayString(phone);
-      if (phoneStr) {
-        rows.push({ ...blankRow, dataType: "Phone", phone: phoneStr });
-      }
+      const phoneStr = toDisplayString(phoneValue);
+      if (!phoneStr) return;
+      const phoneType = leadPhone && normalizePhone(phoneStr) === leadPhone
+        ? "Current Phone"
+        : "Previous/Alternate Phone";
+      console.log("Phone row type:", phoneType, phoneStr);
+      rows.push({ ...blankRow, dataType: phoneType, phone: phoneStr });
     });
 
     (record.EmailRecords || []).forEach((entry) => {
-      const email = typeof entry === "string"
+      const emailValue = typeof entry === "string"
         ? entry
         : entry?.Email || entry?.email || entry?.EmailAddress || "";
-      const emailStr = toDisplayString(email);
-      if (emailStr) {
-        rows.push({ ...blankRow, dataType: "Email", email: emailStr });
-      }
+      const emailStr = toDisplayString(emailValue);
+      if (!emailStr) return;
+      const emailType = leadEmail && normalizeEmail(emailStr) === leadEmail
+        ? "Current Email"
+        : "Previous/Alternate Email";
+      console.log("Email row type:", emailType, emailStr);
+      rows.push({ ...blankRow, dataType: emailType, email: emailStr });
     });
   });
 
