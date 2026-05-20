@@ -925,6 +925,20 @@ function mapMelissaRecords(records) {
  * RENDER RESULTS TABLE
  * =============================== */
 
+const RESULT_COLUMNS = [
+  { key: "melissaRecordLabel", fallback: "—" },
+  { key: "firstName", fallback: "—" },
+  { key: "lastName", fallback: "—" },
+  { key: "birthYear", fallback: "—" },
+  { key: "dataType", fallback: "—" },
+  { key: "homeAddressStreet", fallback: "—" },
+  { key: "homeAddressState", fallback: "—" },
+  { key: "homeAddressCity", fallback: "—" },
+  { key: "homeAddressZip", fallback: "—" },
+  { key: "phone", fallback: "—" },
+  { key: "email", fallback: "—" },
+];
+
 function renderResults(records) {
   els.resultsBody.innerHTML = "";
 
@@ -954,18 +968,12 @@ function renderResults(records) {
       prevGroup = rec.melissaRecordLabel;
     }
 
+    const dataCells = RESULT_COLUMNS
+      .map(({ key, fallback }) => `<td>${escapeHtml(rec[key]) || fallback}</td>`)
+      .join("");
+
     tr.innerHTML = `
-      <td>${escapeHtml(rec.melissaRecordLabel) || "—"}</td>
-      <td>${escapeHtml(rec.firstName) || "—"}</td>
-      <td>${escapeHtml(rec.lastName) || "—"}</td>
-      <td>${escapeHtml(rec.birthYear) || "—"}</td>
-      <td>${escapeHtml(rec.dataType) || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressStreet) || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressState) || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressCity) || "—"}</td>
-      <td>${escapeHtml(rec.homeAddressZip) || "—"}</td>
-      <td>${escapeHtml(rec.phone) || "—"}</td>
-      <td>${escapeHtml(rec.email) || "—"}</td>
+      ${dataCells}
       <td class="action-cell">
         <button class="btn btn-select" data-action="select" data-index="${index}">
           Select
