@@ -14,23 +14,14 @@ html, body {
   color: #1f2937;
   font-size: 14px;
   line-height: 1.45;
-  /* Stop the page itself from scrolling horizontally — only the table-scroll
-     container is allowed to scroll on the X axis. */
-  overflow-x: hidden;
 }
 
-/* ---------- Widget shell ---------- */
-/* Stretches to the full Zoho popup. No max-width cap, no auto-centering.
-   Padding lives on the children (header / wrappers / footer) so they all
-   stay aligned to the same gutter. */
 .widget-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  padding: 0;
+  max-width: 1400px;
+  margin: 0 auto;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
@@ -61,13 +52,7 @@ html, body {
   opacity: 0.85;
 }
 
-.header-actions {
-  flex-grow: 1;
-  display: flex;
-  justify-content: flex-end;
-  max-width: 420px;
-  margin-left: auto;
-}
+.header-actions { flex-grow: 1; max-width: 420px; }
 
 .filter-input {
   width: 100%;
@@ -144,23 +129,10 @@ html, body {
 }
 
 /* ---------- Results Table ---------- */
-/* The wrapper fills the row, then the inner .table-scroll handles horizontal
-   overflow on its own. Horizontal padding on the wrapper keeps the table
-   aligned with header/footer gutters. min-width: 0 lets the flex child shrink
-   correctly inside .widget-shell. */
-.results-wrapper {
-  flex-grow: 1;
-  width: 100%;
-  max-width: none;
-  min-width: 0;
-  padding: 16px 24px 0 24px;
-}
+.results-wrapper { flex-grow: 1; padding: 16px 24px 0 24px; }
 
 .table-scroll {
-  width: 100%;
-  max-width: 100%;
   overflow-x: auto;
-  overflow-y: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
@@ -170,10 +142,7 @@ html, body {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  /* 12 columns: Melissa Record, First, Last, YoB, Data Type, Street, State,
-     City, Zip, Phone, Email, Action. 1100px keeps each column readable on
-     typical popup widths; .table-scroll handles overflow on narrower ones. */
-  min-width: 1100px;
+  min-width: 960px; /* keeps rows horizontal on narrow screens */
 }
 
 .results-table thead {
@@ -197,7 +166,6 @@ html, body {
   border-bottom: 1px solid #f3f4f6;
   vertical-align: middle;
   color: #1f2937;
-  word-break: break-word;
 }
 
 .results-table tbody tr {
@@ -214,7 +182,7 @@ html, body {
 
 .action-col { width: 110px; text-align: right; }
 
-td.action-cell { text-align: right; white-space: nowrap; }
+td.action-cell { text-align: right; }
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -379,11 +347,7 @@ td.action-cell { text-align: right; white-space: nowrap; }
     flex-direction: column;
     align-items: stretch;
   }
-  .header-actions {
-    max-width: 100%;
-    margin-left: 0;
-    justify-content: stretch;
-  }
+  .header-actions { max-width: 100%; }
   .results-wrapper { padding: 12px; }
   .preview-section { margin: 12px; }
 }
