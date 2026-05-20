@@ -767,7 +767,7 @@ function mapMelissaRecords(records) {
       email: "",
     };
 
-    const buildAddressRow = (addr, label) => ({
+    const buildAddressRow = (addr, label, phoneStr, emailStr) => ({
       ...blankRow,
       dataType: label,
       homeAddressStreet: toDisplayString(
@@ -780,41 +780,108 @@ function mapMelissaRecords(records) {
       homeAddressZip: toDisplayString(
         addr?.PostalCode || addr?.Zip || addr?.ZipCode || ""
       ),
+      phone: phoneStr || "",
+      email: emailStr || "",
     });
+
+    // Collect every Melissa phone/email for this person into flat string lists.
+    // Empty entries are dropped so they don't claim a "slot" on a previous-
+    // address row when there's nothing to show.
+    const allPhones = (record.PhoneRecords || [])
+      .map((entry) =>
+        typeof entry === "string"
+          ? entry
+          : entry?.PhoneNumber || entry?.phoneNumber || entry?.Phone || ""
+      )
+      .map(toDisplayString)
+      .filter(Boolean);
+
+    const allEmails = (record.EmailRecords || [])
+      .map((entry) =>
+        typeof entry === "string"
+          ? entry
+          : entry?.Email || entry?.email || entry?.EmailAddress || ""
+      )
+      .map(toDisplayString)
+      .filter(Boolean);
+
+    console.log("All phones:", allPhones);
+    console.log("All emails:", allEmails);
+
+    // Working copies — we splice out values as they get attached to rows so
+    // nothing is shown twice and nothing is silently dropped.
+    const workingPhones = [...allPhones];
+    const workingEmails = [...allEmails];
+
+    let currentPhone = "";
+    let currentEmail = "";
 
     if (record.CurrentAddress) {
-      rows.push(buildAddressRow(record.CurrentAddress, "Current Address"));
+      // Prefer the phone that matches the Lead. Fall back to the first phone
+      // so the CurrentAddress row is never blank when phones exist.
+      currentPhone =
+        (leadPhone && allPhones.find((p) => normalizePhone(p) === leadPhone)) ||
+        allPhones[0] ||
+        "";
+      currentEmail =
+        (leadEmail && allEmails.find((e) => normalizeEmail(e) === leadEmail)) ||
+        allEmails[0] ||
+        "";
+
+      if (currentPhone) {
+        const idx = workingPhones.findIndex(
+          (p) => normalizePhone(p) === normalizePhone(currentPhone)
+        );
+        if (idx !== -1) workingPhones.splice(idx, 1);
+      }
+      if (currentEmail) {
+        const idx = workingEmails.findIndex(
+          (e) => normalizeEmail(e) === normalizeEmail(currentEmail)
+        );
+        if (idx !== -1) workingEmails.splice(idx, 1);
+      }
+
+      console.log("Current Address phone/email:", currentPhone, currentEmail);
+
+      rows.push(
+        buildAddressRow(
+          record.CurrentAddress,
+          "Current Address",
+          currentPhone,
+          currentEmail
+        )
+      );
     }
 
-    (record.PreviousAddresses || []).forEach((addr) => {
-      rows.push(buildAddressRow(addr, "Previous Address"));
+    // Distribute remaining phones/emails across PreviousAddresses by index.
+    // Missing entries leave the cell blank; nothing is duplicated.
+    const prevAddresses = record.PreviousAddresses || [];
+    prevAddresses.forEach((addr, i) => {
+      const phone = workingPhones[i] || "";
+      const email = workingEmails[i] || "";
+      console.log(`Previous Address #${i + 1} phone/email:`, phone, email);
+      rows.push(buildAddressRow(addr, "Previous Address", phone, email));
     });
 
-    (record.PhoneRecords || []).forEach((entry) => {
-      const phoneValue = typeof entry === "string"
-        ? entry
-        : entry?.PhoneNumber || entry?.phoneNumber || entry?.Phone || "";
-      const phoneStr = toDisplayString(phoneValue);
-      if (!phoneStr) return;
-      const phoneType = leadPhone && normalizePhone(phoneStr) === leadPhone
-        ? "Current Phone"
-        : "Previous/Alternate Phone";
-      console.log("Phone row type:", phoneType, phoneStr);
-      rows.push({ ...blankRow, dataType: phoneType, phone: phoneStr });
-    });
+    // Anything left over after the previous-address slots becomes one or more
+    // "Additional Contact" rows so no phone or email gets dropped on the floor.
+    const consumed = prevAddresses.length;
+    const extraPhones = workingPhones.slice(consumed);
+    const extraEmails = workingEmails.slice(consumed);
+    const additionalCount = Math.max(extraPhones.length, extraEmails.length);
 
-    (record.EmailRecords || []).forEach((entry) => {
-      const emailValue = typeof entry === "string"
-        ? entry
-        : entry?.Email || entry?.email || entry?.EmailAddress || "";
-      const emailStr = toDisplayString(emailValue);
-      if (!emailStr) return;
-      const emailType = leadEmail && normalizeEmail(emailStr) === leadEmail
-        ? "Current Email"
-        : "Previous/Alternate Email";
-      console.log("Email row type:", emailType, emailStr);
-      rows.push({ ...blankRow, dataType: emailType, email: emailStr });
-    });
+    for (let i = 0; i < additionalCount; i++) {
+      const phone = extraPhones[i] || "";
+      const email = extraEmails[i] || "";
+      if (!phone && !email) continue;
+      console.log("Additional Contact row phone/email:", phone, email);
+      rows.push({
+        ...blankRow,
+        dataType: "Additional Contact",
+        phone,
+        email,
+      });
+    }
   });
 
   console.log("Flattened Melissa rows:", rows);
