@@ -196,99 +196,158 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
     console.log("Current Lead Data:", currentLeadRecord);
 
-    // 2) Build initial Melissa Search params from Lead values
+    // 2) Build identity params from the Lead. First + Last are mandatory;
+    //    postal / email / phone / birthYear are optional search helpers and
+    //    each spawns an additional Melissa attempt only when present.
     const baseParams = buildMelissaSearchParams(currentLeadRecord);
-    console.log("Melissa Search request params:", baseParams);
+    console.log("Lead identity for search:", baseParams);
 
-    /*
-     * 3) Fallback ladder.
-     * Personator Search is strict by default. If the full-input search
-     * returns zero records, progressively drop fields to broaden the match.
-     * As soon as any attempt returns records, stop.
-     */
-    // The strict UI filter requires First + Last + Zip to match every row, so
-    // there is no point widening the API search beyond those three fields —
-    // any extra rows would just be discarded by the filter.
-    const attempts = [
-      { label: "first + last + postal", params: baseParams },
-      { label: "first + last",          params: { first: baseParams.first, last: baseParams.last } },
-    ];
+    // First + Last are the bare minimum — without them no Melissa search can
+    // satisfy the (First AND Last) clause of the matching filter.
+    if (!baseParams.first || !baseParams.last) {
+      setLoading(false);
+      setEmptyMessage(
+        "Cannot search Melissa: First Name and Last Name are required on the Lead."
+      );
+      showEmpty(true);
+      showResults(false);
+      return;
+    }
 
-    let rawResponse = null;
-    let rawRecords  = [];
-    let totalRecords = 0;
+    // 3) Build every applicable attempt. Skip any combination whose optional
+    //    field is empty.
+    const optionalAttempts = [];
+    if (baseParams.postal) {
+      optionalAttempts.push({
+        label: "first + last + postal",
+        params: { first: baseParams.first, last: baseParams.last, postal: baseParams.postal },
+      });
+    }
+    if (baseParams.email) {
+      optionalAttempts.push({
+        label: "first + last + email",
+        params: { first: baseParams.first, last: baseParams.last, email: baseParams.email },
+      });
+    }
+    if (baseParams.phone) {
+      optionalAttempts.push({
+        label: "first + last + phone",
+        params: { first: baseParams.first, last: baseParams.last, phone: baseParams.phone },
+      });
+    }
+    if (baseParams.birthYear) {
+      optionalAttempts.push({
+        label: "first + last + birth year",
+        params: { first: baseParams.first, last: baseParams.last, birthYear: baseParams.birthYear },
+      });
+    }
+
+    console.log(
+      `Will run ${optionalAttempts.length} optional attempt(s) before fallback. ` +
+      `(Fallback: first + last only.)`
+    );
+
+    // 4) Run every optional attempt, collecting all Records[] in one bucket.
+    const allRaw = [];
     let licenseIssueDetected = false;
+    let lastTransmissionResults = "";
+    let lastRawResponse = null;
 
-    for (let i = 0; i < attempts.length; i++) {
-      const attempt = attempts[i];
+    for (const attempt of optionalAttempts) {
+      console.log(`Attempt: ${attempt.label}`, attempt.params);
 
-      // Skip attempts whose only fields are all empty
-      const anyValue = Object.values(attempt.params).some(Boolean);
-      if (!anyValue) {
-        console.log(`Skipping attempt #${i + 1} (${attempt.label}) — no values to search.`);
+      let rawResponse = null;
+      try {
+        rawResponse = await callMelissaSearchAPI(attempt.params);
+      } catch (attemptErr) {
+        console.error(`Attempt "${attempt.label}" threw:`, attemptErr);
         continue;
       }
 
-      console.log(`Melissa Search attempt #${i + 1}: ${attempt.label}`, attempt.params);
-
-      rawResponse = await callMelissaSearchAPI(attempt.params);
-      console.log("Melissa Search raw response:", rawResponse);
-      console.log("TotalRecords:", rawResponse?.TotalRecords);
-      console.log("TransmissionResults:", rawResponse?.TransmissionResults);
-      console.log("Records:", rawResponse?.Records);
+      lastRawResponse = rawResponse;
+      console.log(`Attempt "${attempt.label}" TransmissionResults:`, rawResponse?.TransmissionResults);
+      console.log(`Attempt "${attempt.label}" TotalRecords:`, rawResponse?.TotalRecords);
 
       if (hasLicenseError(rawResponse)) {
         licenseIssueDetected = true;
+        lastTransmissionResults = String(rawResponse?.TransmissionResults || "");
         break;
       }
 
-      totalRecords = parseInt(rawResponse?.TotalRecords || "0", 10);
-      rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
-
-      if (totalRecords > 0 && rawRecords.length > 0) {
-        // Strict criteria filter: (First AND Last) AND (Email OR Phone OR
-        // BirthYear OR Zip). Applied inside the ladder so a broader query
-        // gets tried if the current one returns records but none match.
-        const matchedRaw = rawRecords.filter((r) =>
-          matchesLeadCriteria(r, currentLeadRecord)
-        );
-        console.log(
-          `Attempt #${i + 1}: ${rawRecords.length} raw → ${matchedRaw.length} matched criteria.`
-        );
-
-        if (matchedRaw.length > 0) {
-          rawRecords = matchedRaw;
-          console.log(
-            `Melissa returned ${matchedRaw.length} matching records on attempt #${i + 1} (${attempt.label}).`
-          );
-          break;
-        }
-
-        console.log(
-          `Attempt #${i + 1} (${attempt.label}) had ${rawRecords.length} records but none matched criteria — trying broader fallback.`
-        );
-        rawRecords = [];
-        continue;
-      }
-
-      console.log(`Attempt #${i + 1} (${attempt.label}) returned 0 records — trying broader fallback.`);
+      const recs = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
+      console.log(`Attempt "${attempt.label}" returned ${recs.length} record(s).`);
+      allRaw.push(...recs);
     }
 
-    setLoading(false);
+    console.log("Total raw records collected from optional attempts:", allRaw.length);
 
-    // License / access failure — distinct message
+    // License / access failure — bail out immediately, no fallback.
     if (licenseIssueDetected) {
-      const tr = String(rawResponse?.TransmissionResults || "");
-      console.error("Melissa license/access error. TransmissionResults:", tr, rawResponse);
+      setLoading(false);
+      console.error("Melissa license/access error. TransmissionResults:", lastTransmissionResults, lastRawResponse);
       setEmptyMessage("Melissa license key or Personator Search access issue.");
       showEmpty(true);
       showResults(false);
       return;
     }
 
-    // All fallback attempts exhausted with no records that passed the
-    // (First AND Last) AND (Email OR Phone OR Birth Year OR Zip) criteria.
-    if (rawRecords.length === 0) {
+    // 5) Dedupe raw Melissa records before filtering — multiple attempts can
+    //    legitimately return the same person.
+    const uniqueRaw = dedupRawMelissaRecords(allRaw);
+    console.log("Unique raw records after dedupe:", uniqueRaw.length);
+
+    // 6) Apply the existing matching filter.
+    let matchedRaw = uniqueRaw.filter((r) => matchesLeadCriteria(r, currentLeadRecord));
+    console.log("Matched records from optional attempts:", matchedRaw.length);
+
+    // 7) If no matches yet, run the first + last fallback attempt and try again.
+    let fallbackUsed = false;
+    if (matchedRaw.length === 0) {
+      fallbackUsed = true;
+      console.log("No matches from optional attempts — running first + last fallback.");
+
+      let fallbackResponse = null;
+      try {
+        fallbackResponse = await callMelissaSearchAPI({
+          first: baseParams.first,
+          last: baseParams.last,
+        });
+      } catch (fallbackErr) {
+        console.error("Fallback attempt threw:", fallbackErr);
+      }
+
+      if (hasLicenseError(fallbackResponse)) {
+        setLoading(false);
+        console.error(
+          "Melissa license/access error on fallback. TransmissionResults:",
+          fallbackResponse?.TransmissionResults,
+          fallbackResponse
+        );
+        setEmptyMessage("Melissa license key or Personator Search access issue.");
+        showEmpty(true);
+        showResults(false);
+        return;
+      }
+
+      const fallbackRecs = Array.isArray(fallbackResponse?.Records)
+        ? fallbackResponse.Records
+        : [];
+      console.log("Fallback raw records:", fallbackRecs.length);
+
+      const fallbackUnique = dedupRawMelissaRecords(fallbackRecs);
+      console.log("Fallback unique records after dedupe:", fallbackUnique.length);
+
+      matchedRaw = fallbackUnique.filter((r) =>
+        matchesLeadCriteria(r, currentLeadRecord)
+      );
+      console.log("Fallback matched records:", matchedRaw.length);
+    }
+
+    console.log("Fallback used:", fallbackUsed);
+
+    setLoading(false);
+
+    if (matchedRaw.length === 0) {
       setEmptyMessage(
         "No Melissa records matched: (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)."
       );
@@ -297,8 +356,8 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // 4) Flatten each matched record into one row per address.
-    const flattenedMelissaRows = mapMelissaRecords(rawRecords);
+    // 8) Flatten each matched record into one row per address.
+    const flattenedMelissaRows = mapMelissaRecords(matchedRaw);
     console.log("Flattened Melissa rows:", flattenedMelissaRows);
 
     // 5) Drop duplicate rows. A record with two PreviousAddresses that share
@@ -378,10 +437,16 @@ async function fetchCurrentLead(leadId) {
  * =============================== */
 
 function buildMelissaSearchParams(lead) {
+  // First + Last are mandatory; the rest are optional helpers that feed the
+  // additional search attempts (first+last+email, first+last+phone, etc.).
   return {
-    first: lead.First_Name || "",
-    last: lead.Last_Name || "",
-    postal: lead.Home_Address_Zip || "",
+    first:     String(lead?.First_Name || "").trim(),
+    last:      String(lead?.Last_Name  || "").trim(),
+    postal:    String(lead?.Home_Address_Zip || "").trim(),
+    email:     String(lead?.Email || "").trim(),
+    phone:     String(lead?.Phone || lead?.Mobile || "").trim(),
+    birthYear: String(lead?.Year_of_Birth || "").trim() ||
+               extractYear(lead?.Date_of_Birth || lead?.DOB),
   };
 }
 
@@ -504,6 +569,46 @@ function matchesLeadCriteria(record, lead) {
   return finalMatchResult;
 }
 
+// Drop duplicate *raw* Melissa records. Multiple search attempts (e.g.
+// first+last+postal and first+last+phone) can each return the same person
+// — we need to collapse them before the matching filter so the row count
+// reported in the console is meaningful.
+function dedupRawMelissaRecords(records) {
+  if (!Array.isArray(records) || records.length === 0) return [];
+
+  const seen = new Set();
+  const unique = [];
+  records.forEach((r) => {
+    const firstName = normalizeName(
+      r?.Name?.FirstName || r?.FirstName || r?.First_Name || r?.First
+    );
+    const lastName = normalizeName(
+      r?.Name?.LastName || r?.LastName || r?.Last_Name || r?.Last
+    );
+    const dob = String(r?.DateOfBirth || r?.YearOfBirth || r?.BirthYear || "").trim();
+    const phone0 = normalizePhone(
+      r?.PhoneRecords?.[0]?.PhoneNumber ||
+      r?.PhoneRecords?.[0]?.phoneNumber ||
+      r?.PhoneRecords?.[0]?.Phone ||
+      ""
+    );
+    const email0 = normalizeEmail(
+      r?.EmailRecords?.[0]?.Email ||
+      r?.EmailRecords?.[0]?.email ||
+      r?.EmailRecords?.[0]?.EmailAddress ||
+      ""
+    );
+    const currentStreet = normalizeName(r?.CurrentAddress?.AddressLine1 || "");
+    const currentZip = normalizeZip(r?.CurrentAddress?.PostalCode || "");
+
+    const key = [firstName, lastName, dob, phone0, email0, currentStreet, currentZip].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(r);
+  });
+  return unique;
+}
+
 // Drop duplicate flattened rows. Two rows are the same person+address+contact
 // if every normalized field collapses to the same string.
 function dedupMelissaRows(rows) {
@@ -599,16 +704,25 @@ async function fetchMelissaOnce(params) {
       "Do not expose your license key in production."
     );
 
+    // Optional Melissa params are appended only when the Lead actually has a
+    // value — keeps the query URL focused and prevents stray empty fields
+    // from narrowing the search on Melissa's side.
+    const optional = (key, value) =>
+      value ? "&" + key + "=" + encodeURIComponent(value) : "";
+
     const url =
       PERSONATOR_ENDPOINT +
       "?id=" + encodeURIComponent(PERSONATOR_LICENSE_KEY) +
       "&cols=GrpAll" +
       "&format=JSON" +
       "&first=" + encodeURIComponent(params.first || "") +
-      "&last=" + encodeURIComponent(params.last || "") +
-      "&city=" + encodeURIComponent(params.city || "") +
-      "&state=" + encodeURIComponent(params.state || "") +
-      "&postal=" + encodeURIComponent(params.postal || "") +
+      "&last="  + encodeURIComponent(params.last  || "") +
+      optional("city",   params.city) +
+      optional("state",  params.state) +
+      optional("postal", params.postal) +
+      optional("email",  params.email) +
+      optional("phone",  params.phone) +
+      optional("dob",    params.birthYear) +
       "&opt=ReturnAllPages:True,SearchConditions:loose";
 
     const maskedUrl = maskKeyInUrl(url);
