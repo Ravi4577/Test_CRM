@@ -8,29 +8,29 @@
 html, body {
   margin: 0;
   padding: 0;
-  width: 100%;
-  min-width: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
   background: #f5f7fa;
   color: #1f2937;
   font-size: 14px;
   line-height: 1.45;
+  /* Stop the page itself from scrolling horizontally — only the table-scroll
+     container is allowed to scroll on the X axis. */
   overflow-x: hidden;
 }
 
-/* Widget shell now fills the entire Zoho popup. No 1400px cap, no auto-margin
-   centering — the popup itself is sized by ZOHO.CRM.UI.Resize() in script.js. */
+/* ---------- Widget shell ---------- */
+/* Stretches to the full Zoho popup. No max-width cap, no auto-centering.
+   Padding lives on the children (header / wrappers / footer) so they all
+   stay aligned to the same gutter. */
 .widget-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   width: 100%;
-  min-width: 0;
   max-width: none;
   margin: 0;
-  padding-left: 0;
-  padding-right: 0;
+  padding: 0;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
@@ -38,7 +38,7 @@ html, body {
 /* ---------- Header ---------- */
 .widget-header {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -62,9 +62,11 @@ html, body {
 }
 
 .header-actions {
-  flex: 1 1 420px;
-  max-width: 620px;
-  min-width: 220px;
+  flex-grow: 1;
+  display: flex;
+  justify-content: flex-end;
+  max-width: 420px;
+  margin-left: auto;
 }
 
 .filter-input {
@@ -142,24 +144,23 @@ html, body {
 }
 
 /* ---------- Results Table ---------- */
-/* Wrapper + scroll container stretch to fill all available horizontal space.
-   Horizontal padding stays on the wrapper so the table edges line up with the
-   header (which also has 24px horizontal padding). */
+/* The wrapper fills the row, then the inner .table-scroll handles horizontal
+   overflow on its own. Horizontal padding on the wrapper keeps the table
+   aligned with header/footer gutters. min-width: 0 lets the flex child shrink
+   correctly inside .widget-shell. */
 .results-wrapper {
   flex-grow: 1;
   width: 100%;
-  min-width: 0;
   max-width: none;
+  min-width: 0;
   padding: 16px 24px 0 24px;
-  overflow: hidden;
 }
 
 .table-scroll {
   width: 100%;
-  min-width: 0;
-  max-width: none;
+  max-width: 100%;
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
@@ -169,8 +170,10 @@ html, body {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 1600px;
-  table-layout: auto;
+  /* 12 columns: Melissa Record, First, Last, YoB, Data Type, Street, State,
+     City, Zip, Phone, Email, Action. 1100px keeps each column readable on
+     typical popup widths; .table-scroll handles overflow on narrower ones. */
+  min-width: 1100px;
 }
 
 .results-table thead {
@@ -194,7 +197,7 @@ html, body {
   border-bottom: 1px solid #f3f4f6;
   vertical-align: middle;
   color: #1f2937;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .results-table tbody tr {
@@ -209,43 +212,9 @@ html, body {
   box-shadow: inset 3px 0 0 #2563eb;
 }
 
-.results-table th:nth-child(1),
-.results-table td:nth-child(1) { min-width: 130px; }
+.action-col { width: 110px; text-align: right; }
 
-.results-table th:nth-child(2),
-.results-table td:nth-child(2),
-.results-table th:nth-child(3),
-.results-table td:nth-child(3) { min-width: 130px; }
-
-.results-table th:nth-child(4),
-.results-table td:nth-child(4) { min-width: 140px; }
-
-.results-table th:nth-child(5),
-.results-table td:nth-child(5) { min-width: 160px; }
-
-.results-table th:nth-child(6),
-.results-table td:nth-child(6) { min-width: 240px; }
-
-.results-table th:nth-child(7),
-.results-table td:nth-child(7),
-.results-table th:nth-child(8),
-.results-table td:nth-child(8) { min-width: 180px; }
-
-.results-table th:nth-child(9),
-.results-table td:nth-child(9),
-.results-table th:nth-child(10),
-.results-table td:nth-child(10) { min-width: 150px; }
-
-.results-table th:nth-child(11),
-.results-table td:nth-child(11) { min-width: 220px; }
-
-.action-col,
-td.action-cell {
-  min-width: 110px;
-  text-align: right;
-}
-
-td.action-cell { position: static; }
+td.action-cell { text-align: right; white-space: nowrap; }
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -410,7 +379,11 @@ td.action-cell { position: static; }
     flex-direction: column;
     align-items: stretch;
   }
-  .header-actions { max-width: 100%; }
+  .header-actions {
+    max-width: 100%;
+    margin-left: 0;
+    justify-content: stretch;
+  }
   .results-wrapper { padding: 12px; }
   .preview-section { margin: 12px; }
 }
