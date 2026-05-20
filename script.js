@@ -510,6 +510,7 @@ function dedupMelissaRows(rows) {
   const unique = [];
   rows.forEach((row) => {
     const key = [
+      String(row.melissaRecordLabel || "").trim(),
       normalizeName(row.firstName),
       normalizeName(row.lastName),
       String(row.birthYear || "").trim(),
@@ -732,7 +733,12 @@ function mapMelissaRecords(records) {
 
   const rows = [];
 
-  records.forEach((record) => {
+  records.forEach((record, recordIndex) => {
+    // Label every row this record produces so the UI can group Current +
+    // Previous addresses by their source person. Same label flows through
+    // address rows, phone rows, email rows, and "Additional Contact" rows.
+    const groupLabel = `Record #${recordIndex + 1}`;
+    console.log(`Building rows for ${groupLabel}`);
     console.log("Parent PhoneRecords:", record.PhoneRecords);
     console.log("Parent EmailRecords:", record.EmailRecords);
 
@@ -767,6 +773,7 @@ function mapMelissaRecords(records) {
     // only email. The Update Lead payload reads from non-empty cells, so a
     // Phone row never overwrites the Lead's address fields, and vice versa.
     const blankRow = {
+      melissaRecordLabel: groupLabel,
       firstName,
       lastName,
       birthYear,
@@ -916,11 +923,25 @@ function renderResults(records) {
   showEmpty(false);
   showResults(true);
 
+  // Track which record group we just rendered so we can mark the row that
+  // *starts* a new group with a separator border + tinted background.
+  let prevGroup = null;
+
   records.forEach((rec, index) => {
     const tr = document.createElement("tr");
     tr.dataset.index = index;
+    tr.dataset.melissaRecord = rec.melissaRecordLabel || "";
+
+    if (rec.melissaRecordLabel && rec.melissaRecordLabel !== prevGroup) {
+      // First row of a new Melissa Record group — visually break from the
+      // previous group with a thicker top border and a subtle tint.
+      tr.style.borderTop = "2px solid #c5cee0";
+      tr.style.backgroundColor = "#f5f8fc";
+      prevGroup = rec.melissaRecordLabel;
+    }
 
     tr.innerHTML = `
+      <td>${escapeHtml(rec.melissaRecordLabel) || "—"}</td>
       <td>${escapeHtml(rec.firstName) || "—"}</td>
       <td>${escapeHtml(rec.lastName) || "—"}</td>
       <td>${escapeHtml(rec.birthYear) || "—"}</td>
@@ -978,6 +999,7 @@ function markSelectedRow(index) {
 
 function renderPreview(rec) {
   const fields = [
+    ["Melissa Record", rec.melissaRecordLabel],
     ["First Name", rec.firstName],
     ["Last Name", rec.lastName],
     ["Year of Birth", rec.birthYear],
@@ -1014,6 +1036,7 @@ els.filterInput.addEventListener("input", (e) => {
   } else {
     filteredRecords = melissaRecords.filter((r) =>
       [
+        r.melissaRecordLabel,
         r.firstName,
         r.lastName,
         r.birthYear,
