@@ -512,6 +512,7 @@ function dedupMelissaRows(rows) {
     const key = [
       normalizeName(row.firstName),
       normalizeName(row.lastName),
+      String(row.birthYear || "").trim(),
       normalizeName(row.dataType),
       normalizeName(row.homeAddressStreet),
       normalizeName(row.homeAddressCity),
@@ -724,8 +725,10 @@ function mapMelissaRecords(records) {
     currentLeadRecord?.Phone || currentLeadRecord?.Mobile || ""
   );
   const leadEmail = normalizeEmail(currentLeadRecord?.Email || "");
+  const leadBirthYear = String(currentLeadRecord?.Year_of_Birth || "").trim();
   console.log("Lead phone for comparison:", leadPhone);
   console.log("Lead email for comparison:", leadEmail);
+  console.log("Lead Birth Year:", leadBirthYear);
 
   const rows = [];
 
@@ -751,6 +754,14 @@ function mapMelissaRecords(records) {
 
     console.log("Extracted firstName:", firstName, "lastName:", lastName);
 
+    // Melissa returns DateOfBirth as YYYYMM (e.g. "195808" for Aug 1958).
+    // First 4 chars give the year — that's what Year_of_Birth on the Lead stores.
+    const rawDob = String(record.DateOfBirth || "");
+    const birthYear =
+      rawDob && rawDob.length >= 4 ? rawDob.substring(0, 4) : "";
+    console.log("Melissa DOB:", record.DateOfBirth);
+    console.log("Extracted Melissa Birth Year:", birthYear);
+
     // Base shape every row shares. Address rows fill the address cells and
     // leave phone/email blank; phone rows fill only phone; email rows fill
     // only email. The Update Lead payload reads from non-empty cells, so a
@@ -758,6 +769,7 @@ function mapMelissaRecords(records) {
     const blankRow = {
       firstName,
       lastName,
+      birthYear,
       dataType: "",
       homeAddressStreet: "",
       homeAddressState: "",
@@ -911,6 +923,7 @@ function renderResults(records) {
     tr.innerHTML = `
       <td>${escapeHtml(rec.firstName) || "—"}</td>
       <td>${escapeHtml(rec.lastName) || "—"}</td>
+      <td>${escapeHtml(rec.birthYear) || "—"}</td>
       <td>${escapeHtml(rec.dataType) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressStreet) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressState) || "—"}</td>
@@ -967,6 +980,7 @@ function renderPreview(rec) {
   const fields = [
     ["First Name", rec.firstName],
     ["Last Name", rec.lastName],
+    ["Year of Birth", rec.birthYear],
     ["Data Type", rec.dataType],
     ["Home Address Street", rec.homeAddressStreet],
     ["Home Address State", rec.homeAddressState],
@@ -1002,6 +1016,7 @@ els.filterInput.addEventListener("input", (e) => {
       [
         r.firstName,
         r.lastName,
+        r.birthYear,
         r.dataType,
         r.homeAddressStreet,
         r.homeAddressState,
