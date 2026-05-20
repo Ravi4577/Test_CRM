@@ -108,7 +108,8 @@ const els = {
  * UI HELPERS
  * =============================== */
 
-function showBanner(message, type = "info") {
+function showBanner(message, type = "info")
+ {
   els.banner.textContent = message;
   els.banner.className = `banner banner-${type}`;
 }
@@ -168,19 +169,6 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   console.log("PageLoad data:", data);
   sdkReady = true;
 
-  // Resize the Zoho CRM popup to a larger modal as soon as PageLoad fires.
-  // Wrapped in try/catch so a missing Resize API on older SDK builds can't
-  // break the rest of the widget initialization.
-  try {
-    if (ZOHO?.CRM?.UI?.Resize) {
-      ZOHO.CRM.UI.Resize({ height: "100%", width: "100%" })
-        .then((res) => console.log("Zoho popup resized:", res))
-        .catch((err) => console.warn("Zoho popup resize failed:", err));
-    }
-  } catch (resizeErr) {
-    console.warn("Zoho popup resize threw:", resizeErr);
-  }
-
   if (data) {
     if (data.EntityId) {
       currentLeadId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
@@ -191,18 +179,17 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
   console.log("Current Lead ID:", currentLeadId);
 
-  // The leadContext element is intentionally hidden — the Lead ID is a
-  // technical detail that doesn't belong in the user-facing header.
-  if (els.leadContext) els.leadContext.style.display = "none";
-
   if (!currentLeadId) {
     setLoading(false);
     showBanner(
       "Current Lead ID not found. Please open this widget from a Lead record.",
       "error"
     );
+    els.leadContext.textContent = "No Lead context";
     return;
   }
+
+  els.leadContext.textContent = `Current Lead ID: ${currentLeadId}`;
 
   try {
     // 1) Fetch current Lead — used ONLY as Melissa Search input + final update target
