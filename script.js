@@ -512,6 +512,7 @@ function dedupMelissaRows(rows) {
     const key = [
       normalizeName(row.firstName),
       normalizeName(row.lastName),
+      normalizeName(row.dataType),
       normalizeName(row.homeAddressStreet),
       normalizeName(row.homeAddressCity),
       normalizeName(row.homeAddressState),
@@ -719,49 +720,46 @@ function mapMelissaRecords(records) {
   const rows = [];
 
   records.forEach((record) => {
-    // Identity, phone, email live at the PARENT record level — extract once
-    // and attach to every address row produced from this record so the strict
-    // First + Last + Zip filter has firstName/lastName on every flattened row.
     console.log("Parent PhoneRecords:", record.PhoneRecords);
     console.log("Parent EmailRecords:", record.EmailRecords);
 
-    const firstName =
+    const firstName = toDisplayString(
       record.Name?.FirstName ||
       record.FirstName ||
       record.First_Name ||
       record.First ||
-      "";
+      ""
+    );
 
-    const lastName =
+    const lastName = toDisplayString(
       record.Name?.LastName ||
       record.LastName ||
       record.Last_Name ||
       record.Last ||
-      "";
-
-    const phone =
-      record.PhoneRecords?.[0]?.PhoneNumber ||
-      record.PhoneRecords?.[0]?.phoneNumber ||
-      record.PhoneRecords?.[0]?.Phone ||
-      record.PhoneNumber ||
-      record.Phone ||
-      "";
-
-    const email =
-      record.EmailRecords?.[0]?.Email ||
-      record.EmailRecords?.[0]?.email ||
-      record.EmailRecords?.[0]?.EmailAddress ||
-      record.EmailAddress ||
-      record.Email ||
-      "";
+      ""
+    );
 
     console.log("Extracted firstName:", firstName, "lastName:", lastName);
-    console.log("Extracted phone:", phone);
-    console.log("Extracted email:", email);
 
-    const buildRow = (addr) => ({
-      firstName: toDisplayString(firstName),
-      lastName: toDisplayString(lastName),
+    // Base shape every row shares. Address rows fill the address cells and
+    // leave phone/email blank; phone rows fill only phone; email rows fill
+    // only email. The Update Lead payload reads from non-empty cells, so a
+    // Phone row never overwrites the Lead's address fields, and vice versa.
+    const blankRow = {
+      firstName,
+      lastName,
+      dataType: "",
+      homeAddressStreet: "",
+      homeAddressState: "",
+      homeAddressCity: "",
+      homeAddressZip: "",
+      phone: "",
+      email: "",
+    };
+
+    const buildAddressRow = (addr, label) => ({
+      ...blankRow,
+      dataType: label,
       homeAddressStreet: toDisplayString(
         addr?.AddressLine1 || addr?.AddressLine || addr?.Address || addr?.Street || ""
       ),
@@ -772,62 +770,35 @@ function mapMelissaRecords(records) {
       homeAddressZip: toDisplayString(
         addr?.PostalCode || addr?.Zip || addr?.ZipCode || ""
       ),
-      phone: toDisplayString(phone),
-      email: toDisplayString(email),
     });
 
     if (record.CurrentAddress) {
-      rows.push(buildRow(record.CurrentAddress));
+      rows.push(buildAddressRow(record.CurrentAddress, "Current Address"));
     }
 
     (record.PreviousAddresses || []).forEach((addr) => {
-      rows.push(buildRow(addr));
+      rows.push(buildAddressRow(addr, "Previous Address"));
     });
 
-    // Fallback: if the record has neither CurrentAddress nor PreviousAddresses,
-    // still emit one row using legacy flat keys so phone/email aren't lost.
-    if (!record.CurrentAddress && !(record.PreviousAddresses || []).length) {
-      const street =
-        pickValue(record, [
-          "AddressLine1", "Address1", "StreetAddress", "Street",
-          "DeliveryAddress", "AddressDeliveryLine", "DeliveryLine", "AddressLine",
-          "Address.AddressLine1", "Address.AddressLine",
-          "AddressDetails.AddressLine1", "GrpAddressDetails.AddressLine1",
-          "MailingAddress.AddressLine1",
-        ]) ||
-        buildStreetFromParts(record) ||
-        "";
+    (record.PhoneRecords || []).forEach((entry) => {
+      const phone = typeof entry === "string"
+        ? entry
+        : entry?.PhoneNumber || entry?.phoneNumber || entry?.Phone || "";
+      const phoneStr = toDisplayString(phone);
+      if (phoneStr) {
+        rows.push({ ...blankRow, dataType: "Phone", phone: phoneStr });
+      }
+    });
 
-      const city = pickValue(record, [
-        "City", "Locality", "AddressCity", "MailingCity",
-        "Address.City", "AddressDetails.City",
-        "GrpAddressDetails.City", "MailingAddress.City",
-      ]);
-
-      const state = pickValue(record, [
-        "State", "AdministrativeArea", "AddressState", "MailingState", "StateProvince",
-        "Address.State", "AddressDetails.State",
-        "GrpAddressDetails.State", "MailingAddress.State",
-      ]);
-
-      const zip = pickValue(record, [
-        "PostalCode", "Zip", "ZipCode",
-        "AddressPostalCode", "MailingPostalCode", "PostalCodePlus4",
-        "Address.PostalCode", "AddressDetails.PostalCode",
-        "GrpAddressDetails.PostalCode", "MailingAddress.PostalCode",
-      ]);
-
-      rows.push({
-        firstName: toDisplayString(firstName),
-        lastName: toDisplayString(lastName),
-        homeAddressStreet: toDisplayString(street),
-        homeAddressState: toDisplayString(state),
-        homeAddressCity: toDisplayString(city),
-        homeAddressZip: toDisplayString(zip),
-        phone: toDisplayString(phone),
-        email: toDisplayString(email),
-      });
-    }
+    (record.EmailRecords || []).forEach((entry) => {
+      const email = typeof entry === "string"
+        ? entry
+        : entry?.Email || entry?.email || entry?.EmailAddress || "";
+      const emailStr = toDisplayString(email);
+      if (emailStr) {
+        rows.push({ ...blankRow, dataType: "Email", email: emailStr });
+      }
+    });
   });
 
   console.log("Flattened Melissa rows:", rows);
@@ -857,6 +828,7 @@ function renderResults(records) {
     tr.innerHTML = `
       <td>${escapeHtml(rec.firstName) || "—"}</td>
       <td>${escapeHtml(rec.lastName) || "—"}</td>
+      <td>${escapeHtml(rec.dataType) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressStreet) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressState) || "—"}</td>
       <td>${escapeHtml(rec.homeAddressCity) || "—"}</td>
@@ -912,6 +884,7 @@ function renderPreview(rec) {
   const fields = [
     ["First Name", rec.firstName],
     ["Last Name", rec.lastName],
+    ["Data Type", rec.dataType],
     ["Home Address Street", rec.homeAddressStreet],
     ["Home Address State", rec.homeAddressState],
     ["Home Address City", rec.homeAddressCity],
@@ -946,6 +919,7 @@ els.filterInput.addEventListener("input", (e) => {
       [
         r.firstName,
         r.lastName,
+        r.dataType,
         r.homeAddressStreet,
         r.homeAddressState,
         r.homeAddressCity,
@@ -1076,30 +1050,32 @@ async function updateLeadRecord() {
  *
  * Zip is NEVER copied into Street/State/City in either mode.
  * ------------------------------------------------------------- */
+// Only include fields whose value is non-empty on the selected row. Because
+// rows now come in four shapes (Current/Previous Address, Phone, Email), a
+// Phone row carries only `phone` and emits only `{ id, Phone }`; an Address
+// row emits only the four address keys; and so on. Empty cells never reach
+// Zoho, so other CRM fields can't be wiped out.
 function buildUpdatePayload(leadId, rec) {
   if (ADDRESS_UPDATE_MODE === "compound") {
-    return {
-      id: leadId,
-      Home_Address: {
-        Street: rec.homeAddressStreet || "",
-        State: rec.homeAddressState || "",
-        City: rec.homeAddressCity || "",
-        Zip: rec.homeAddressZip || "",
-      },
-      [FIELD_API_NAMES.phone]: rec.phone || "",
-      [FIELD_API_NAMES.email]: rec.email || "",
-    };
+    const payload = { id: leadId };
+    const homeAddress = {};
+    if (rec.homeAddressStreet) homeAddress.Street = rec.homeAddressStreet;
+    if (rec.homeAddressState)  homeAddress.State  = rec.homeAddressState;
+    if (rec.homeAddressCity)   homeAddress.City   = rec.homeAddressCity;
+    if (rec.homeAddressZip)    homeAddress.Zip    = rec.homeAddressZip;
+    if (Object.keys(homeAddress).length) payload.Home_Address = homeAddress;
+    if (rec.phone) payload[FIELD_API_NAMES.phone] = rec.phone;
+    if (rec.email) payload[FIELD_API_NAMES.email] = rec.email;
+    return payload;
   }
 
-  // Separate-fields mode — payload assembled from FIELD_API_NAMES so the
-  // mapping is editable in one place. Zip stays isolated from Street/State/City.
   const updatePayload = { id: leadId };
-  updatePayload[FIELD_API_NAMES.street] = rec.homeAddressStreet || "";
-  updatePayload[FIELD_API_NAMES.state]  = rec.homeAddressState  || "";
-  updatePayload[FIELD_API_NAMES.city]   = rec.homeAddressCity   || "";
-  updatePayload[FIELD_API_NAMES.zip]    = rec.homeAddressZip    || "";
-  updatePayload[FIELD_API_NAMES.phone]  = rec.phone             || "";
-  updatePayload[FIELD_API_NAMES.email]  = rec.email             || "";
+  if (rec.homeAddressStreet) updatePayload[FIELD_API_NAMES.street] = rec.homeAddressStreet;
+  if (rec.homeAddressState)  updatePayload[FIELD_API_NAMES.state]  = rec.homeAddressState;
+  if (rec.homeAddressCity)   updatePayload[FIELD_API_NAMES.city]   = rec.homeAddressCity;
+  if (rec.homeAddressZip)    updatePayload[FIELD_API_NAMES.zip]    = rec.homeAddressZip;
+  if (rec.phone)             updatePayload[FIELD_API_NAMES.phone]  = rec.phone;
+  if (rec.email)             updatePayload[FIELD_API_NAMES.email]  = rec.email;
   return updatePayload;
 }
 
