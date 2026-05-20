@@ -178,17 +178,18 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
   console.log("Current Lead ID:", currentLeadId);
 
+  // The leadContext element is intentionally hidden — the Lead ID is a
+  // technical detail that doesn't belong in the user-facing header.
+  if (els.leadContext) els.leadContext.style.display = "none";
+
   if (!currentLeadId) {
     setLoading(false);
     showBanner(
       "Current Lead ID not found. Please open this widget from a Lead record.",
       "error"
     );
-    els.leadContext.textContent = "No Lead context";
     return;
   }
-
-  els.leadContext.textContent = `Current Lead ID: ${currentLeadId}`;
 
   try {
     // 1) Fetch current Lead — used ONLY as Melissa Search input + final update target
