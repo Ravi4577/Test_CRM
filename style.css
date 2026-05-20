@@ -16,12 +16,17 @@ html, body {
   line-height: 1.45;
 }
 
+/* Widget shell now fills the entire Zoho popup. No 1400px cap, no auto-margin
+   centering — the popup itself is sized by ZOHO.CRM.UI.Resize() in script.js. */
 .widget-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding-left: 0;
+  padding-right: 0;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
@@ -129,9 +134,19 @@ html, body {
 }
 
 /* ---------- Results Table ---------- */
-.results-wrapper { flex-grow: 1; padding: 16px 24px 0 24px; }
+/* Wrapper + scroll container stretch to fill all available horizontal space.
+   Horizontal padding stays on the wrapper so the table edges line up with the
+   header (which also has 24px horizontal padding). */
+.results-wrapper {
+  flex-grow: 1;
+  width: 100%;
+  max-width: none;
+  padding: 16px 24px 0 24px;
+}
 
 .table-scroll {
+  width: 100%;
+  max-width: none;
   overflow-x: auto;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -142,7 +157,10 @@ html, body {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 960px; /* keeps rows horizontal on narrow screens */
+  /* Raised from 960px to 1200px to fit the 11-column layout (First Name,
+     Last Name, Year of Birth, Data Type, Street, State, City, Zip, Phone,
+     Email, Action) without crushing each cell. */
+  min-width: 1200px;
 }
 
 .results-table thead {
