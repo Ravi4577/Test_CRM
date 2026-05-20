@@ -245,8 +245,29 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       rawRecords = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
 
       if (totalRecords > 0 && rawRecords.length > 0) {
-        console.log(`Melissa returned ${rawRecords.length} records on attempt #${i + 1} (${attempt.label}).`);
-        break;
+        // Strict criteria filter: (First AND Last) AND (Email OR Phone OR
+        // BirthYear OR Zip). Applied inside the ladder so a broader query
+        // gets tried if the current one returns records but none match.
+        const matchedRaw = rawRecords.filter((r) =>
+          matchesLeadCriteria(r, currentLeadRecord)
+        );
+        console.log(
+          `Attempt #${i + 1}: ${rawRecords.length} raw → ${matchedRaw.length} matched criteria.`
+        );
+
+        if (matchedRaw.length > 0) {
+          rawRecords = matchedRaw;
+          console.log(
+            `Melissa returned ${matchedRaw.length} matching records on attempt #${i + 1} (${attempt.label}).`
+          );
+          break;
+        }
+
+        console.log(
+          `Attempt #${i + 1} (${attempt.label}) had ${rawRecords.length} records but none matched criteria — trying broader fallback.`
+        );
+        rawRecords = [];
+        continue;
       }
 
       console.log(`Attempt #${i + 1} (${attempt.label}) returned 0 records — trying broader fallback.`);
@@ -264,62 +285,31 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // All fallback attempts exhausted with no records
+    // All fallback attempts exhausted with no records that passed the
+    // (First AND Last) AND (Email OR Phone OR Birth Year OR Zip) criteria.
     if (rawRecords.length === 0) {
-      setEmptyMessage("No Melissa Search records found after broad search.");
+      setEmptyMessage(
+        "No Melissa records matched: (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)."
+      );
       showEmpty(true);
       showResults(false);
       return;
     }
 
-    // 4) Map ONLY from Melissa response.Records (never from lead)
+    // 4) Flatten each matched record into one row per address.
     const flattenedMelissaRows = mapMelissaRecords(rawRecords);
-    console.log("Flattened Melissa rows before filter:", flattenedMelissaRows);
+    console.log("Flattened Melissa rows:", flattenedMelissaRows);
 
-    // 5) Filter — keep a row if EITHER both First+Last match the Lead,
-    //    OR the Home Address Zip matches the Lead. A row missing on name
-    //    but matching on zip still shows, and vice versa.
-    const leadFirstName = normalizeName(currentLeadRecord.First_Name);
-    const leadLastName  = normalizeName(currentLeadRecord.Last_Name);
-    const leadZip       = normalizeZip(currentLeadRecord.Home_Address_Zip);
+    // 5) Drop duplicate rows. A record with two PreviousAddresses that share
+    //    the same street+city+zip would otherwise produce two identical rows.
+    const uniqueRows = dedupMelissaRows(flattenedMelissaRows);
+    console.log(
+      `Dedup: ${flattenedMelissaRows.length} → ${uniqueRows.length} unique rows.`
+    );
 
-    console.log("FILTER ACTIVE: (First Name AND Last Name) OR ZIP");
-    console.log("Lead First Name:", leadFirstName);
-    console.log("Lead Last Name:", leadLastName);
-    console.log("Lead Zip:", leadZip);
-
-    const matchedRecords = flattenedMelissaRows.filter((record) => {
-      const recordFirstName = normalizeName(record.firstName);
-      const recordLastName  = normalizeName(record.lastName);
-      const recordZip       = normalizeZip(record.homeAddressZip);
-
-      const firstNameMatch = recordFirstName === leadFirstName;
-      const lastNameMatch  = recordLastName  === leadLastName;
-      const zipMatch       = recordZip       === leadZip;
-
-      console.log("Compare:", {
-        leadFirstName,
-        recordFirstName,
-        firstNameMatch,
-        leadLastName,
-        recordLastName,
-        lastNameMatch,
-        leadZip,
-        recordZip,
-        zipMatch,
-      });
-
-      return (
-        (leadFirstName && leadLastName && firstNameMatch && lastNameMatch) ||
-        (leadZip && zipMatch)
-      );
-    });
-
-    console.log("Filtered records — (First+Last) OR Zip match:", matchedRecords);
-
-    if (matchedRecords.length === 0) {
+    if (uniqueRows.length === 0) {
       setEmptyMessage(
-        "No Melissa records found matching: (First Name AND Last Name) OR Home Address Zip."
+        "No Melissa records matched: (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)."
       );
       showEmpty(true);
       showResults(false);
@@ -327,8 +317,8 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     }
 
     // 6) Render
-    melissaRecords  = matchedRecords;
-    filteredRecords = [...matchedRecords];
+    melissaRecords  = uniqueRows;
+    filteredRecords = [...uniqueRows];
 
     renderResults(filteredRecords);
     showResults(true);
@@ -404,6 +394,122 @@ function normalizeName(value) {
 
 function normalizeZip(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 5);
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+// Phone numbers may carry country codes, separators, parentheses. Reduce to
+// digits and compare on the last 10 (US numbering plan) so "+1 (513) 668-6893"
+// matches "5136686893".
+function normalizePhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+// Pull the year out of any date-ish string. Accepts "1985", "1985-03-12",
+// "03/12/1985", ISO strings, etc.
+function extractYear(value) {
+  if (!value) return "";
+  const m = String(value).match(/(19|20)\d{2}/);
+  return m ? m[0] : "";
+}
+
+/* ===============================
+ * RECORD-LEVEL FILTER
+ * -------------------------------
+ * Final condition required by the business:
+ *   (First Name match AND Last Name match)
+ *   AND
+ *   (Email OR Phone OR Birth Year OR Zip match)
+ *
+ * Zip match uses the union of CurrentAddress + PreviousAddresses, so a person
+ * with multiple known addresses still matches if any of their zips lines up.
+ * =============================== */
+function matchesLeadCriteria(record, lead) {
+  const leadFirstName = normalizeName(lead?.First_Name);
+  const leadLastName  = normalizeName(lead?.Last_Name);
+  const leadEmail     = normalizeEmail(lead?.Email);
+  const leadPhone     = normalizePhone(lead?.Phone || lead?.Mobile);
+  const leadBirthYear = extractYear(lead?.Date_of_Birth || lead?.DOB);
+  const leadZip       = normalizeZip(lead?.Home_Address_Zip || lead?.Zip_Code);
+
+  const recFirstName = normalizeName(
+    record?.Name?.FirstName || record?.FirstName || record?.First_Name || record?.First
+  );
+  const recLastName = normalizeName(
+    record?.Name?.LastName || record?.LastName || record?.Last_Name || record?.Last
+  );
+
+  const recEmails = (record?.EmailRecords || [])
+    .map((e) => (typeof e === "string" ? e : e?.Email || e?.email || e?.EmailAddress))
+    .map(normalizeEmail)
+    .filter(Boolean);
+
+  const recPhones = (record?.PhoneRecords || [])
+    .map((p) => (typeof p === "string" ? p : p?.PhoneNumber || p?.phoneNumber || p?.Phone))
+    .map(normalizePhone)
+    .filter(Boolean);
+
+  const recBirthYear = extractYear(
+    record?.YearOfBirth || record?.BirthYear || record?.DateOfBirth || record?.DOB
+  );
+
+  const recZips = [];
+  if (record?.CurrentAddress?.PostalCode) {
+    recZips.push(normalizeZip(record.CurrentAddress.PostalCode));
+  }
+  (record?.PreviousAddresses || []).forEach((a) => {
+    if (a?.PostalCode) recZips.push(normalizeZip(a.PostalCode));
+  });
+
+  const firstNameMatch = Boolean(leadFirstName) && recFirstName === leadFirstName;
+  const lastNameMatch  = Boolean(leadLastName)  && recLastName  === leadLastName;
+  const emailMatch     = Boolean(leadEmail)     && recEmails.includes(leadEmail);
+  const phoneMatch     = Boolean(leadPhone)     && recPhones.includes(leadPhone);
+  const birthYearMatch = Boolean(leadBirthYear) && recBirthYear === leadBirthYear;
+  const zipMatch       = Boolean(leadZip)       && recZips.includes(leadZip);
+
+  const secondaryMatch = emailMatch || phoneMatch || birthYearMatch || zipMatch;
+  const finalMatchResult = firstNameMatch && lastNameMatch && secondaryMatch;
+
+  console.log("matchesLeadCriteria:", {
+    record: { firstName: recFirstName, lastName: recLastName, emails: recEmails, phones: recPhones, birthYear: recBirthYear, zips: recZips },
+    lead:   { firstName: leadFirstName, lastName: leadLastName, email: leadEmail, phone: leadPhone, birthYear: leadBirthYear, zip: leadZip },
+    firstNameMatch,
+    lastNameMatch,
+    emailMatch,
+    phoneMatch,
+    birthYearMatch,
+    zipMatch,
+    finalMatchResult,
+  });
+
+  return finalMatchResult;
+}
+
+// Drop duplicate flattened rows. Two rows are the same person+address+contact
+// if every normalized field collapses to the same string.
+function dedupMelissaRows(rows) {
+  const seen = new Set();
+  const unique = [];
+  rows.forEach((row) => {
+    const key = [
+      normalizeName(row.firstName),
+      normalizeName(row.lastName),
+      normalizeName(row.homeAddressStreet),
+      normalizeName(row.homeAddressCity),
+      normalizeName(row.homeAddressState),
+      normalizeZip(row.homeAddressZip),
+      normalizePhone(row.phone),
+      normalizeEmail(row.email),
+    ].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(row);
+  });
+  return unique;
 }
 
 /* ===============================
