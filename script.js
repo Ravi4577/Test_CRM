@@ -168,6 +168,19 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   console.log("PageLoad data:", data);
   sdkReady = true;
 
+  // Resize the Zoho CRM popup to a larger modal as soon as PageLoad fires.
+  // Wrapped in try/catch so a missing Resize API on older SDK builds can't
+  // break the rest of the widget initialization.
+  try {
+    if (ZOHO?.CRM?.UI?.Resize) {
+      ZOHO.CRM.UI.Resize({ height: "90%", width: "95%" })
+        .then((res) => console.log("Zoho popup resized:", res))
+        .catch((err) => console.warn("Zoho popup resize failed:", err));
+    }
+  } catch (resizeErr) {
+    console.warn("Zoho popup resize threw:", resizeErr);
+  }
+
   if (data) {
     if (data.EntityId) {
       currentLeadId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
