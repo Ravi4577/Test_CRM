@@ -173,7 +173,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   // break the rest of the widget initialization.
   try {
     if (ZOHO?.CRM?.UI?.Resize) {
-      ZOHO.CRM.UI.Resize({ height: "1600%", width: "900%" })
+      ZOHO.CRM.UI.Resize({ height: "100%", width: "100%" })
         .then((res) => console.log("Zoho popup resized:", res))
         .catch((err) => console.warn("Zoho popup resize failed:", err));
     }
