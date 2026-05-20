@@ -432,7 +432,11 @@ function matchesLeadCriteria(record, lead) {
   const leadLastName  = normalizeName(lead?.Last_Name);
   const leadEmail     = normalizeEmail(lead?.Email);
   const leadPhone     = normalizePhone(lead?.Phone || lead?.Mobile);
-  const leadBirthYear = extractYear(lead?.Date_of_Birth || lead?.DOB);
+  // Zoho stores the year as a 4-digit value in Year_of_Birth. Fall back to a
+  // full date field only if Year_of_Birth is empty, so the regex extractor
+  // still works for legacy Date_of_Birth values.
+  const leadBirthYear = String(lead?.Year_of_Birth || "").trim() ||
+                        extractYear(lead?.Date_of_Birth || lead?.DOB);
   const leadZip       = normalizeZip(lead?.Home_Address_Zip || lead?.Zip_Code);
 
   const recFirstName = normalizeName(
@@ -452,9 +456,14 @@ function matchesLeadCriteria(record, lead) {
     .map(normalizePhone)
     .filter(Boolean);
 
-  const recBirthYear = extractYear(
-    record?.YearOfBirth || record?.BirthYear || record?.DateOfBirth || record?.DOB
-  );
+  // Melissa returns DateOfBirth as "YYYYMM" (e.g. "195407" for July 1954).
+  // Slice the first 4 chars to keep just the year. Fall back to other
+  // year-like fields if DateOfBirth is missing.
+  const rawDob = String(record?.DateOfBirth || "").trim();
+  const recBirthYear =
+    rawDob.substring(0, 4) ||
+    String(record?.YearOfBirth || record?.BirthYear || "").trim() ||
+    extractYear(record?.DOB);
 
   const recZips = [];
   if (record?.CurrentAddress?.PostalCode) {
@@ -470,6 +479,11 @@ function matchesLeadCriteria(record, lead) {
   const phoneMatch     = Boolean(leadPhone)     && recPhones.includes(leadPhone);
   const birthYearMatch = Boolean(leadBirthYear) && recBirthYear === leadBirthYear;
   const zipMatch       = Boolean(leadZip)       && recZips.includes(leadZip);
+
+  console.log("Lead Birth Year:", leadBirthYear);
+  console.log("Melissa DOB:", rawDob);
+  console.log("Extracted Melissa Birth Year:", recBirthYear);
+  console.log("Birth Year Match:", birthYearMatch);
 
   const secondaryMatch = emailMatch || phoneMatch || birthYearMatch || zipMatch;
   const finalMatchResult = firstNameMatch && lastNameMatch && secondaryMatch;
