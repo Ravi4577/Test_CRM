@@ -974,6 +974,17 @@ function selectRecord(index) {
   const record = filteredRecords[index];
   if (!record) return;
 
+  // Toggle: clicking the already-selected row clears the selection.
+  if (selectedIndex === index) {
+    console.log("Deselecting Melissa record at index:", index);
+    selectedIndex = -1;
+    selectedMelissaRecord = null;
+    markSelectedRow(-1);
+    showPreview(false);
+    refreshUpdateButton();
+    return;
+  }
+
   selectedIndex = index;
   selectedMelissaRecord = record;
   console.log("Selected Melissa record:", selectedMelissaRecord);
