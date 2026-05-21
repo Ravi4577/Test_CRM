@@ -169,6 +169,16 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   console.log("PageLoad data:", data);
   sdkReady = true;
 
+  // Enlarge the Zoho widget popup as soon as the page loads. Wrapped in a
+  // try/catch so older SDK builds that don't expose Resize don't break load.
+  try {
+    if (ZOHO?.CRM?.UI?.Resize) {
+      ZOHO.CRM.UI.Resize({ height: "1000", width: "1800" });
+    }
+  } catch (resizeErr) {
+    console.warn("ZOHO.CRM.UI.Resize failed:", resizeErr);
+  }
+
   if (data) {
     if (data.EntityId) {
       currentLeadId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
