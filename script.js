@@ -173,7 +173,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   // try/catch so older SDK builds that don't expose Resize don't break load.
   try {
     if (ZOHO?.CRM?.UI?.Resize) {
-      ZOHO.CRM.UI.Resize({ height: "2500", width: "2500" });
+      ZOHO.CRM.UI.Resize({ height: "1000", width: "1900" });
     }
   } catch (resizeErr) {
     console.warn("ZOHO.CRM.UI.Resize failed:", resizeErr);
