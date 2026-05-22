@@ -1245,35 +1245,49 @@ if (document.readyState === "loading") {
 }
 
 async function updateLeadRecord() {
+  console.log("Update Lead button clicked");
+  console.log("Current Lead ID:", currentLeadId);
+  console.log("Selected Melissa Record:", selectedMelissaRecord);
+  console.log("SDK Ready:", sdkReady);
+
+  if (!sdkReady) {
+    showBanner("Zoho SDK is not ready.", "error");
+    return;
+  }
+  if (!currentLeadId) {
+    showBanner("Current Lead ID not found.", "error");
+    return;
+  }
+  if (!selectedMelissaRecord) {
+    showBanner("Please select a Melissa record first.", "error");
+    return;
+  }
+
+  // Take a plain-string snapshot of ONLY the fields we send to Zoho. The
+  // snapshot is what flows into buildUpdatePayload / ZOHO.CRM.API.updateRecord
+  // — selectedMelissaRecord itself is never passed downstream. This guarantees
+  // no caller in the update path can mutate the live widget row by reference,
+  // even accidentally (e.g. via toJSON, payload normalization, etc.).
+  const updateSnapshot = {
+    homeAddressStreet: String(selectedMelissaRecord.homeAddressStreet || ""),
+    homeAddressState:  String(selectedMelissaRecord.homeAddressState  || ""),
+    homeAddressCity:   String(selectedMelissaRecord.homeAddressCity   || ""),
+    homeAddressZip:    String(selectedMelissaRecord.homeAddressZip    || ""),
+    phone:             String(selectedMelissaRecord.phone             || ""),
+    email:             String(selectedMelissaRecord.email             || ""),
+  };
+
+  hideBanner();
+  if (updateLeadBtn) {
+    updateLeadBtn.disabled = true;
+    updateLeadBtn.textContent = "Updating...";
+  }
+
   try {
-    console.log("Update Lead button clicked");
-    console.log("Current Lead ID:", currentLeadId);
-    console.log("Selected Melissa Record:", selectedMelissaRecord);
-    console.log("SDK Ready:", sdkReady);
-
-    if (!sdkReady) {
-      showBanner("Zoho SDK is not ready.", "error");
-      return;
-    }
-    if (!currentLeadId) {
-      showBanner("Current Lead ID not found.", "error");
-      return;
-    }
-    if (!selectedMelissaRecord) {
-      showBanner("Please select a Melissa record first.", "error");
-      return;
-    }
-
-    hideBanner();
-    if (updateLeadBtn) {
-      updateLeadBtn.disabled = true;
-      updateLeadBtn.textContent = "Updating...";
-    }
-
     // Payload is built via FIELD_API_NAMES so Street/State/City API names
     // remain editable in one place — change them in the config block at the
     // top of the file. Zip/Phone/Email are confirmed working.
-    const updatePayload = buildUpdatePayload(currentLeadId, selectedMelissaRecord);
+    const updatePayload = buildUpdatePayload(currentLeadId, updateSnapshot);
     console.log("ZOHO UPDATE PAYLOAD:", updatePayload);
 
     const updateResponse = await ZOHO.CRM.API.updateRecord({
@@ -1296,6 +1310,17 @@ async function updateLeadRecord() {
       );
     }
 
+    // CRM update succeeded. Show the success modal ONLY. The widget table
+    // displays Melissa search results and must stay identical to what was on
+    // screen before the click. Intentionally NOT done here:
+    //   - mutating selectedMelissaRecord
+    //   - mutating melissaRecords / filteredRecords / row objects
+    //   - calling renderResults() with CRM-updated data
+    //   - rebuilding rows from the updated Lead
+    //   - re-fetching currentLeadRecord (would shift Current/Previous labels
+    //     because mapMelissaRecords compares row phones/emails to the Lead)
+    // If the table needs to refresh, the user closes the widget and reopens
+    // it — that path re-runs the Melissa search from scratch.
     showSuccessModal("Record update successfully");
   } catch (error) {
     console.error("Update Lead failed:", error);
