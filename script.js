@@ -429,12 +429,56 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     console.log("Duplicate records removed:", duplicatesRemoved);
     console.log("Unique records count:", uniqueRaw.length);
 
-    // 6) Apply the existing matching filter (unchanged logic), against the
-    //    SNAPSHOT criteria — not the live CRM Lead. This is the key change
-    //    that keeps Person #1 visible after Update Lead has rewritten the
-    //    live Lead's Email/Phone/Zip to Person #2's values.
-    const matchedRaw = uniqueRaw.filter((r) => matchesLeadCriteria(r, searchLeadRecord));
-    console.log("Final matched records count (after matchesLeadCriteria):", matchedRaw.length);
+    // 6) Two-tier matching to keep all valid persons in the table even when
+    //    the snapshot was created after an earlier Update Lead (the cause of
+    //    the lead-specific regression: snapshot captured already-updated
+    //    CRM values, strict match then drops Person #1 because none of its
+    //    secondary fields line up with Person #2's data).
+    //
+    //    Tier 1 — STRICT: unchanged matchesLeadCriteria —
+    //      (First AND Last) AND (Email OR Phone OR Year OR Zip).
+    //    Tier 2 — FALLBACK: First Name + Last Name only.
+    //      Records returned by the "First + Last fallback" Melissa attempt
+    //      already share the Lead's name; the strict filter was the only
+    //      thing knocking them out. Including them here keeps Person #1
+    //      visible across any future Update Lead.
+    //
+    //    Records that pass Tier 1 are reported as strict; records that fail
+    //    Tier 1 but pass Tier 2 are reported as fallback. They render
+    //    identically — the tier label is internal/diagnostic only.
+    const strictMatched = [];
+    const fallbackMatched = [];
+    const skippedRecords = [];
+
+    uniqueRaw.forEach((r) => {
+      const key = getMelissaUniqueKey(r);
+      if (matchesLeadCriteria(r, searchLeadRecord)) {
+        strictMatched.push(r);
+        return;
+      }
+      if (matchesLeadNameOnly(r, searchLeadRecord)) {
+        fallbackMatched.push(r);
+        console.log(
+          "Including FALLBACK (name-only) record — strict criteria failed but First+Last matched:",
+          key
+        );
+        return;
+      }
+      skippedRecords.push({
+        key,
+        reason: "First Name and/or Last Name did not match the Lead",
+      });
+    });
+
+    console.log("Strict matched records count:", strictMatched.length);
+    console.log("Fallback matched records count (first+last only):", fallbackMatched.length);
+    console.log("Skipped records with reason:", skippedRecords);
+
+    // Union — strict first, then fallback. dedupRawMelissaRecords already
+    // ran on uniqueRaw upstream, so the two arrays are disjoint and the
+    // concat is safe.
+    const matchedRaw = strictMatched.concat(fallbackMatched);
+    console.log("Final rendered records count:", matchedRaw.length);
     console.log(
       "Matched record identity keys:",
       matchedRaw.map((r) => getMelissaUniqueKey(r))
@@ -678,6 +722,26 @@ function matchesLeadCriteria(record, lead) {
   });
 
   return finalMatchResult;
+}
+
+// Name-only fallback predicate. Returns true when the record's First Name
+// AND Last Name match the Lead's First Name AND Last Name. Used as Tier 2
+// of the result filter so that records returned by the First+Last fallback
+// Melissa attempt are kept even when every secondary criterion (Email /
+// Phone / Year / Zip) has been rewritten by an Update Lead click.
+function matchesLeadNameOnly(record, lead) {
+  const leadFirstName = normalizeName(lead?.First_Name);
+  const leadLastName  = normalizeName(lead?.Last_Name);
+  if (!leadFirstName || !leadLastName) return false;
+
+  const recFirstName = normalizeName(
+    record?.Name?.FirstName || record?.FirstName || record?.First_Name || record?.First
+  );
+  const recLastName = normalizeName(
+    record?.Name?.LastName || record?.LastName || record?.Last_Name || record?.Last
+  );
+
+  return recFirstName === leadFirstName && recLastName === leadLastName;
 }
 
 // Build the strict identity key for a raw Melissa record.
