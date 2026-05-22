@@ -1072,7 +1072,7 @@ function mapMelissaRecords(records) {
     // Label every row this record produces so the UI can group Current +
     // Previous addresses by their source person. Same label flows through
     // address rows, phone rows, email rows, and "Additional Contact" rows.
-    const groupLabel = `Record #${recordIndex + 1}`;
+    const groupLabel = `Person #${recordIndex + 1}`;
     console.log(`Building rows for ${groupLabel}`);
     console.log("Parent PhoneRecords:", record.PhoneRecords);
     console.log("Parent EmailRecords:", record.EmailRecords);
