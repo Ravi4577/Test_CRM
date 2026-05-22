@@ -338,6 +338,38 @@ td.action-cell { text-align: right; }
   box-shadow: 0 8px 20px rgba(16, 185, 129, 0.35);
 }
 
+/* ---------- Preview Modal (Selected Record popup) ----------
+   Wider variant of .modal-card sized for the multi-field preview grid.
+   Reuses .modal-backdrop centering, fadeIn/popIn animations, and the
+   existing .preview-grid/.preview-item/.preview-label/.preview-value
+   styles — nothing in the inline preview section is restyled. */
+.preview-modal-card {
+  max-width: 760px;
+  width: 92%;
+  padding: 22px 26px;
+  text-align: left;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.preview-modal-card h2 {
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #6b7280;
+}
+
+.preview-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
 /* ---------- Utility ---------- */
 .hidden { display: none !important; }
 

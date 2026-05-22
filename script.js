@@ -156,6 +156,8 @@ const els = {
   resultsBody: document.getElementById("resultsBody"),
   previewSec: document.getElementById("previewSection"),
   previewGrid: document.getElementById("previewGrid"),
+  previewCancelBtn: document.getElementById("previewCancelBtn"),
+  previewUpdateBtn: document.getElementById("previewUpdateBtn"),
   cancelBtn: document.getElementById("cancelBtn"),
   filterInput: document.getElementById("filterInput"),
   successModal: document.getElementById("successModal"),
@@ -214,9 +216,11 @@ function escapeHtml(str) {
 let updateLeadBtn = null;
 
 function refreshUpdateButton() {
-  if (!updateLeadBtn) return;
-  updateLeadBtn.disabled =
-    !sdkReady || !currentLeadId || !selectedMelissaRecord;
+  const disabled = !sdkReady || !currentLeadId || !selectedMelissaRecord;
+  if (updateLeadBtn) updateLeadBtn.disabled = disabled;
+  // The preview-modal Update Lead button shares the same enabled-state
+  // contract as the footer button so either entry point behaves identically.
+  if (els.previewUpdateBtn) els.previewUpdateBtn.disabled = disabled;
 }
 
 /* ===============================
@@ -1529,6 +1533,12 @@ async function updateLeadRecord() {
     updateLeadBtn.disabled = true;
     updateLeadBtn.textContent = "Updating...";
   }
+  // Mirror the busy-state onto the preview-modal Update Lead button so the
+  // user can't double-click while the Zoho API call is in flight.
+  if (els.previewUpdateBtn) {
+    els.previewUpdateBtn.disabled = true;
+    els.previewUpdateBtn.textContent = "Updating...";
+  }
 
   // Diagnostic snapshot BEFORE the CRM update — captures the phone that's
   // currently rendered in every row, including the Current Address row.
@@ -1575,6 +1585,16 @@ async function updateLeadRecord() {
       "Selected update did NOT replace/filter the full results list."
     );
 
+    // Close the preview popup before showing the success modal so the two
+    // backdrops don't stack visually. Selection state is cleared because
+    // the chosen row has now been pushed to CRM — re-selecting it would
+    // be a no-op.
+    showPreview(false);
+    selectedIndex = -1;
+    selectedMelissaRecord = null;
+    markSelectedRow(-1);
+    refreshUpdateButton();
+
     const success =
       updateResponse &&
       updateResponse.data &&
@@ -1608,6 +1628,11 @@ async function updateLeadRecord() {
       updateLeadBtn.disabled = false;
       updateLeadBtn.textContent = "Update Lead";
     }
+    if (els.previewUpdateBtn) {
+      els.previewUpdateBtn.textContent = "Update Lead";
+      // refreshUpdateButton will re-derive disabled state from selection.
+    }
+    refreshUpdateButton();
   }
 }
 
@@ -1682,6 +1707,31 @@ function showSuccessModal(message) {
 
 els.successClose.addEventListener("click", closeWidget);
 els.cancelBtn.addEventListener("click", closeWidget);
+
+// Preview-modal Cancel: closes ONLY the preview popup and deselects the row.
+// It must NOT update CRM and must NOT close the widget — the user returns to
+// the table to pick a different row. Mirrors the toggle-deselect branch of
+// selectRecord so selection state stays internally consistent.
+if (els.previewCancelBtn) {
+  els.previewCancelBtn.addEventListener("click", function () {
+    console.log("Preview modal Cancel clicked — closing modal and deselecting row.");
+    selectedIndex = -1;
+    selectedMelissaRecord = null;
+    markSelectedRow(-1);
+    showPreview(false);
+    refreshUpdateButton();
+  });
+}
+
+// Preview-modal Update Lead: reuses the existing updateLeadRecord flow
+// verbatim. The same selectedMelissaRecord, same snapshot, same Zoho API
+// call, same success modal. Nothing about the update path changes.
+if (els.previewUpdateBtn) {
+  els.previewUpdateBtn.addEventListener("click", async function () {
+    console.log("Preview modal Update Lead clicked — running existing updateLeadRecord().");
+    await updateLeadRecord();
+  });
+}
 
 function closeWidget() {
   try {
