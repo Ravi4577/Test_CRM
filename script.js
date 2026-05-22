@@ -85,6 +85,12 @@ let filteredRecords = [];
 let selectedMelissaRecord = null;
 let selectedIndex = -1;
 
+// Latch that flips true once the Melissa table has rendered successfully.
+// PageLoad uses it to bail out on any subsequent fire so we never rebuild
+// rows against an updated Lead — that's what was reshuffling phones between
+// Current Address and Previous Address rows after Update Lead.
+let melissaTableRendered = false;
+
 /* ===============================
  * DOM REFERENCES
  * =============================== */
@@ -177,6 +183,21 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     }
   } catch (resizeErr) {
     console.warn("ZOHO.CRM.UI.Resize failed:", resizeErr);
+  }
+
+  // PageLoad can re-fire after ZOHO.CRM.API.updateRecord on some SDK builds.
+  // A second run would re-fetch the (now-updated) Lead and re-call
+  // mapMelissaRecords, which picks the Current Address phone by matching
+  // against the Lead's phone. Once the Lead's phone is the value the user
+  // just selected, the row assignment shifts: the selected phone migrates to
+  // the Current row and the prior Current-row phone gets pushed into a
+  // Previous row — exactly the swap reported. Bail out before any state
+  // touches the DOM so the displayed table stays frozen.
+  if (melissaTableRendered) {
+    console.log(
+      "PageLoad re-fired after initial render — skipping to preserve Melissa table phones."
+    );
+    return;
   }
 
   if (data) {
@@ -356,13 +377,22 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // 6) Render
-    melissaRecords  = uniqueRows;
-    filteredRecords = [...uniqueRows];
+    // 6) Render. Freeze every row object so that nothing downstream — the
+    //    update handler, the filter handler, Zoho SDK callbacks, accidental
+    //    assignments — can rewrite a cell after the table is on screen.
+    //    Object.freeze on each row turns any later `row.phone = ...` into a
+    //    silent no-op (strict mode throws), which is exactly the guarantee
+    //    the spec asks for: phones must stay in their original rows.
+    melissaRecords  = uniqueRows.map((r) => Object.freeze({ ...r }));
+    filteredRecords = melissaRecords.slice();
 
     renderResults(filteredRecords);
     showResults(true);
     els.filterInput.disabled = false;
+
+    // Latch the table as rendered AFTER a successful render path only — a
+    // mid-load failure must still allow a clean retry on the next PageLoad.
+    melissaTableRendered = true;
   } catch (err) {
     console.error("Widget load error:", err);
     setLoading(false);
