@@ -1085,6 +1085,18 @@ function mapMelissaRecords(records) {
       ""
     );
 
+    // Display-only Middle Name — surfaced in the table so users can tell
+    // apart records that share First + Last (+ sometimes Year of Birth).
+    // Never written to the CRM Lead (Leads has no Middle Name field) and
+    // never part of buildUpdatePayload.
+    const middleName = toDisplayString(
+      record.Name?.MiddleName ||
+      record.MiddleName ||
+      record.Middle_Name ||
+      record.Middle ||
+      ""
+    );
+
     const lastName = toDisplayString(
       record.Name?.LastName ||
       record.LastName ||
@@ -1093,7 +1105,7 @@ function mapMelissaRecords(records) {
       ""
     );
 
-    console.log("Extracted firstName:", firstName, "lastName:", lastName);
+    console.log("Extracted firstName:", firstName, "middleName:", middleName, "lastName:", lastName);
 
     // Melissa returns DateOfBirth as YYYYMM (e.g. "195808" for Aug 1958).
     // First 4 chars give the year — that's what Year_of_Birth on the Lead stores.
@@ -1110,6 +1122,7 @@ function mapMelissaRecords(records) {
     const blankRow = {
       melissaRecordLabel: groupLabel,
       firstName,
+      middleName,
       lastName,
       birthYear,
       dataType: "",
@@ -1291,6 +1304,7 @@ function renderResults(records) {
     tr.innerHTML = `
       <td>${escapeHtml(rec.melissaRecordLabel) || "—"}</td>
       <td>${escapeHtml(rec.firstName) || "—"}</td>
+      <td>${escapeHtml(rec.middleName) || "—"}</td>
       <td>${escapeHtml(rec.lastName) || "—"}</td>
       <td>${escapeHtml(rec.birthYear) || "—"}</td>
       <td>${escapeHtml(rec.dataType) || "—"}</td>
