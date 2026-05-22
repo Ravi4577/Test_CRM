@@ -998,35 +998,36 @@ function mapMelissaRecords(records) {
       .map(toDisplayString)
       .filter(Boolean);
 
-    console.log("All phones:", allPhones);
+    console.log("All phones (Melissa order, immutable):", allPhones);
     console.log("All emails:", allEmails);
 
-    // Working copies — we splice out values as they get attached to rows so
-    // nothing is shown twice and nothing is silently dropped.
-    const workingPhones = [...allPhones];
+    // Working copy of emails — emails still use the lead-match strategy
+    // (unchanged, per spec). Phones are now assigned purely by position
+    // against Melissa's PhoneRecords order, so a `workingPhones` array is
+    // unnecessary: position N in allPhones ALWAYS belongs to the Nth row,
+    // regardless of what the CRM Lead's phone happens to be at render time.
     const workingEmails = [...allEmails];
 
-    let currentPhone = "";
     let currentEmail = "";
 
     if (record.CurrentAddress) {
-      // Prefer the phone that matches the Lead. Fall back to the first phone
-      // so the CurrentAddress row is never blank when phones exist.
-      currentPhone =
-        (leadPhone && allPhones.find((p) => normalizePhone(p) === leadPhone)) ||
-        allPhones[0] ||
-        "";
+      // PHONE: deterministic, position-based. Current row owns allPhones[0]
+      // forever. This used to call allPhones.find(matchesLeadPhone) — that
+      // was the bug source: after Update Lead, the CRM Lead's phone changed
+      // to the selected row's value, the iframe reloaded, .find() returned
+      // the selected phone for the Current row, and the previous Current
+      // phone got pushed into the Previous slot. By dropping the lead
+      // lookup, the Current/Previous phone assignment is locked to
+      // Melissa's response order and cannot swap regardless of CRM state.
+      const currentPhone = allPhones[0] || "";
+
+      // EMAIL: unchanged per spec — prefer the Lead-matching email, fall
+      // back to the first email.
       currentEmail =
         (leadEmail && allEmails.find((e) => normalizeEmail(e) === leadEmail)) ||
         allEmails[0] ||
         "";
 
-      if (currentPhone) {
-        const idx = workingPhones.findIndex(
-          (p) => normalizePhone(p) === normalizePhone(currentPhone)
-        );
-        if (idx !== -1) workingPhones.splice(idx, 1);
-      }
       if (currentEmail) {
         const idx = workingEmails.findIndex(
           (e) => normalizeEmail(e) === normalizeEmail(currentEmail)
@@ -1034,7 +1035,8 @@ function mapMelissaRecords(records) {
         if (idx !== -1) workingEmails.splice(idx, 1);
       }
 
-      console.log("Current Address phone/email:", currentPhone, currentEmail);
+      console.log("Original row phone (Current Address):", currentPhone);
+      console.log("Current Address email:", currentEmail);
 
       rows.push(
         buildAddressRow(
@@ -1046,28 +1048,39 @@ function mapMelissaRecords(records) {
       );
     }
 
-    // Distribute remaining phones/emails across PreviousAddresses by index.
-    // Missing entries leave the cell blank; nothing is duplicated.
+    // PHONE distribution for Previous Addresses: position-locked to
+    // allPhones. Previous Address #i owns allPhones[i + 1] (because the
+    // Current row owns allPhones[0]). No splicing, no Lead matching, no
+    // re-binding ever — phone-to-row is determined entirely by Melissa's
+    // PhoneRecords order.
+    //
+    // EMAIL distribution is unchanged: it still uses workingEmails so the
+    // Lead-matched email behavior is preserved (per spec: do not change
+    // email behavior).
     const prevAddresses = record.PreviousAddresses || [];
+    const phoneOffset = record.CurrentAddress ? 1 : 0;
     prevAddresses.forEach((addr, i) => {
-      const phone = workingPhones[i] || "";
+      const phone = allPhones[phoneOffset + i] || "";
       const email = workingEmails[i] || "";
-      console.log(`Previous Address #${i + 1} phone/email:`, phone, email);
+      console.log(`Original row phone (Previous Address #${i + 1}):`, phone);
+      console.log(`Previous Address #${i + 1} email:`, email);
       rows.push(buildAddressRow(addr, "Previous Address", phone, email));
     });
 
-    // Anything left over after the previous-address slots becomes one or more
-    // "Additional Contact" rows so no phone or email gets dropped on the floor.
-    const consumed = prevAddresses.length;
-    const extraPhones = workingPhones.slice(consumed);
-    const extraEmails = workingEmails.slice(consumed);
+    // Anything past the previous-address slots becomes "Additional Contact"
+    // rows so no phone or email is dropped on the floor. Phones index off
+    // allPhones; emails still index off workingEmails (preserved behavior).
+    const extraPhoneStart = phoneOffset + prevAddresses.length;
+    const extraPhones = allPhones.slice(extraPhoneStart);
+    const extraEmails = workingEmails.slice(prevAddresses.length);
     const additionalCount = Math.max(extraPhones.length, extraEmails.length);
 
     for (let i = 0; i < additionalCount; i++) {
       const phone = extraPhones[i] || "";
       const email = extraEmails[i] || "";
       if (!phone && !email) continue;
-      console.log("Additional Contact row phone/email:", phone, email);
+      console.log("Original row phone (Additional Contact):", phone);
+      console.log("Additional Contact email:", email);
       rows.push({
         ...blankRow,
         dataType: "Additional Contact",
@@ -1162,11 +1175,30 @@ function selectRecord(index) {
   selectedIndex = index;
   selectedMelissaRecord = record;
   console.log("Selected Melissa record:", selectedMelissaRecord);
+  console.log("Selected row phone:", record.phone);
+  console.log("Selected row dataType:", record.dataType);
 
   markSelectedRow(index);
   renderPreview(record);
   showPreview(true);
   refreshUpdateButton();
+}
+
+// Diagnostic helper: snapshot the phone value currently rendered in each row
+// of the displayed table. Lets us prove, before and after the CRM update,
+// that the widget rows did NOT change.
+function snapshotDisplayedRowPhones(label) {
+  const snapshot = filteredRecords.map((r, i) => ({
+    rowIndex: i,
+    dataType: r.dataType,
+    phone: r.phone,
+  }));
+  console.log(`[${label}] displayed row phones:`, snapshot);
+  const currentRow = snapshot.find((r) => r.dataType === "Current Address");
+  if (currentRow) {
+    console.log(`[${label}] Current Address row phone:`, currentRow.phone);
+  }
+  return snapshot;
 }
 
 function markSelectedRow(index) {
@@ -1313,6 +1345,11 @@ async function updateLeadRecord() {
     updateLeadBtn.textContent = "Updating...";
   }
 
+  // Diagnostic snapshot BEFORE the CRM update — captures the phone that's
+  // currently rendered in every row, including the Current Address row.
+  // The "after update" snapshot below must match this exactly.
+  const phonesBefore = snapshotDisplayedRowPhones("BEFORE UPDATE");
+
   try {
     // Payload is built via FIELD_API_NAMES so Street/State/City API names
     // remain editable in one place — change them in the config block at the
@@ -1326,6 +1363,15 @@ async function updateLeadRecord() {
     });
 
     console.log("ZOHO UPDATE RESPONSE:", updateResponse);
+
+    // Diagnostic snapshot AFTER the CRM update — proves the displayed rows
+    // were not mutated, re-mapped, or rebuilt. Compare phone-by-phone
+    // against phonesBefore; any mismatch is a regression of the swap bug.
+    const phonesAfter = snapshotDisplayedRowPhones("AFTER UPDATE");
+    const swapped = phonesBefore.some(
+      (b, i) => phonesAfter[i] && phonesAfter[i].phone !== b.phone
+    );
+    console.log("Phone swap detected after update?", swapped);
 
     const success =
       updateResponse &&
