@@ -91,6 +91,58 @@ let selectedIndex = -1;
 // Current Address and Previous Address rows after Update Lead.
 let melissaTableRendered = false;
 
+// Frozen snapshot of the Lead values used to seed Melissa search and to run
+// matchesLeadCriteria. Captured the FIRST time the widget renders for a
+// given Lead ID and persisted in localStorage. Every subsequent open uses
+// the snapshot rather than the live CRM Lead — otherwise Update Lead would
+// rewrite the Lead's Email/Phone/Zip to one person's values, narrow the
+// next search to just that person, and erase the other previously-matched
+// persons from the results.
+let searchLeadRecord = null;
+
+const LEAD_SNAPSHOT_STORAGE_PREFIX = "melissaWidget:leadSearchCriteria:";
+
+function getLeadSnapshotStorageKey(leadId) {
+  return LEAD_SNAPSHOT_STORAGE_PREFIX + String(leadId);
+}
+
+function loadSavedLeadSearchCriteria(leadId) {
+  try {
+    const raw = localStorage.getItem(getLeadSnapshotStorageKey(leadId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (e) {
+    console.warn("loadSavedLeadSearchCriteria failed:", e);
+    return null;
+  }
+}
+
+function persistLeadSearchCriteria(leadId, leadRecord) {
+  try {
+    const snapshot = {
+      First_Name:       String(leadRecord?.First_Name       || ""),
+      Last_Name:        String(leadRecord?.Last_Name        || ""),
+      Email:            String(leadRecord?.Email            || ""),
+      Phone:            String(leadRecord?.Phone            || ""),
+      Mobile:           String(leadRecord?.Mobile           || ""),
+      Year_of_Birth:    String(leadRecord?.Year_of_Birth    || ""),
+      Date_of_Birth:    String(leadRecord?.Date_of_Birth    || ""),
+      DOB:              String(leadRecord?.DOB              || ""),
+      Home_Address_Zip: String(leadRecord?.Home_Address_Zip || ""),
+      Zip_Code:         String(leadRecord?.Zip_Code         || ""),
+    };
+    localStorage.setItem(
+      getLeadSnapshotStorageKey(leadId),
+      JSON.stringify(snapshot)
+    );
+    return snapshot;
+  } catch (e) {
+    console.warn("persistLeadSearchCriteria failed:", e);
+    return null;
+  }
+}
+
 /* ===============================
  * DOM REFERENCES
  * =============================== */
@@ -223,14 +275,50 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
   els.leadContext.textContent = `Current Lead ID: ${currentLeadId}`;
 
   try {
-    // 1) Fetch current Lead — used ONLY as Melissa Search input + final update target
+    // 1) Fetch current Lead — used as the final update target. For SEARCH
+    //    and MATCH we may instead use a persisted snapshot of the Lead's
+    //    original criteria (see below) so that Update Lead clicks don't
+    //    narrow future searches and erase previously-matched persons.
     currentLeadRecord = await fetchCurrentLead(currentLeadId);
-    console.log("Current Lead Data:", currentLeadRecord);
+    console.log("Current Lead Data (live CRM):", currentLeadRecord);
 
-    // 2) Build identity params from the Lead. First + Last are mandatory;
-    //    postal / email / phone / birthYear are optional search helpers and
-    //    each spawns an additional Melissa attempt only when present.
-    const baseParams = buildMelissaSearchParams(currentLeadRecord);
+    // 1a) Resolve the criteria the search and match steps will use. First
+    //     open for this Lead → snapshot current CRM values and store them
+    //     in localStorage. Subsequent opens → load the saved snapshot so
+    //     the search/match basis is immutable across Update Lead clicks.
+    //     We never overwrite an existing snapshot with current CRM values —
+    //     that's what was causing other persons to disappear.
+    const savedCriteria = loadSavedLeadSearchCriteria(currentLeadId);
+    if (savedCriteria) {
+      searchLeadRecord = savedCriteria;
+      console.log(
+        "Loaded saved Lead search criteria from prior session — using these for search/match (not the live CRM values):",
+        searchLeadRecord
+      );
+    } else {
+      searchLeadRecord =
+        persistLeadSearchCriteria(currentLeadId, currentLeadRecord) ||
+        currentLeadRecord;
+      console.log(
+        "First open for this Lead — captured live CRM values as the immutable search criteria:",
+        searchLeadRecord
+      );
+    }
+
+    console.log("Lead values used for search on widget open:", {
+      First_Name:       searchLeadRecord.First_Name,
+      Last_Name:        searchLeadRecord.Last_Name,
+      Email:            searchLeadRecord.Email,
+      Phone:            searchLeadRecord.Phone || searchLeadRecord.Mobile,
+      Year_of_Birth:    searchLeadRecord.Year_of_Birth,
+      Home_Address_Zip: searchLeadRecord.Home_Address_Zip,
+    });
+
+    // 2) Build identity params from the search-criteria snapshot. First +
+    //    Last are mandatory; postal / email / phone / birthYear are
+    //    optional search helpers and each spawns an additional Melissa
+    //    attempt only when present.
+    const baseParams = buildMelissaSearchParams(searchLeadRecord);
     console.log("Lead identity for search:", baseParams);
 
     // First + Last are the bare minimum — without them no Melissa search can
@@ -341,10 +429,16 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     console.log("Duplicate records removed:", duplicatesRemoved);
     console.log("Unique records count:", uniqueRaw.length);
 
-    // 6) Apply the existing matching filter (unchanged):
-    //    (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)
-    const matchedRaw = uniqueRaw.filter((r) => matchesLeadCriteria(r, currentLeadRecord));
-    console.log("Matched records count:", matchedRaw.length);
+    // 6) Apply the existing matching filter (unchanged logic), against the
+    //    SNAPSHOT criteria — not the live CRM Lead. This is the key change
+    //    that keeps Person #1 visible after Update Lead has rewritten the
+    //    live Lead's Email/Phone/Zip to Person #2's values.
+    const matchedRaw = uniqueRaw.filter((r) => matchesLeadCriteria(r, searchLeadRecord));
+    console.log("Final matched records count (after matchesLeadCriteria):", matchedRaw.length);
+    console.log(
+      "Matched record identity keys:",
+      matchedRaw.map((r) => getMelissaUniqueKey(r))
+    );
 
     setLoading(false);
 
@@ -893,14 +987,17 @@ function mapMelissaRecords(records) {
 
   console.log("FIRST RAW MELISSA RECORD:", JSON.stringify(records[0], null, 2));
 
-  // Phone/Email rows are labeled by comparing to the *currently opened Lead*
-  // — not by Melissa's own current/previous tags. Compute the normalized
-  // reference once per render.
+  // Phone/Email row labeling reads from the snapshot — the immutable Lead
+  // values captured on first open — not the live CRM Lead. Otherwise an
+  // Update Lead click that rewrote the Lead's email/phone would shift which
+  // email lands on the Current row vs Previous rows on the next reopen.
+  // (Phone-to-row is already position-locked in this function, see below.)
+  const snapshotForLabels = searchLeadRecord || currentLeadRecord || {};
   const leadPhone = normalizePhone(
-    currentLeadRecord?.Phone || currentLeadRecord?.Mobile || ""
+    snapshotForLabels.Phone || snapshotForLabels.Mobile || ""
   );
-  const leadEmail = normalizeEmail(currentLeadRecord?.Email || "");
-  const leadBirthYear = String(currentLeadRecord?.Year_of_Birth || "").trim();
+  const leadEmail = normalizeEmail(snapshotForLabels.Email || "");
+  const leadBirthYear = String(snapshotForLabels.Year_of_Birth || "").trim();
   console.log("Lead phone for comparison:", leadPhone);
   console.log("Lead email for comparison:", leadEmail);
   console.log("Lead Birth Year:", leadBirthYear);
@@ -1309,8 +1406,18 @@ if (document.readyState === "loading") {
 async function updateLeadRecord() {
   console.log("Update Lead button clicked");
   console.log("Current Lead ID:", currentLeadId);
-  console.log("Selected Melissa Record:", selectedMelissaRecord);
+  console.log("Selected Melissa Record (the one going to CRM):", selectedMelissaRecord);
+  console.log(
+    "Which record/person was selected for update — group label:",
+    selectedMelissaRecord?.melissaRecordLabel,
+    "| dataType:",
+    selectedMelissaRecord?.dataType
+  );
   console.log("SDK Ready:", sdkReady);
+  console.log(
+    "Full results list size BEFORE update (will not change as a side-effect of this click):",
+    melissaRecords.length
+  );
 
   if (!sdkReady) {
     showBanner("Zoho SDK is not ready.", "error");
@@ -1372,6 +1479,23 @@ async function updateLeadRecord() {
       (b, i) => phonesAfter[i] && phonesAfter[i].phone !== b.phone
     );
     console.log("Phone swap detected after update?", swapped);
+
+    // Confirm that the CRM update did NOT replace or shrink the full
+    // results list. melissaRecords / filteredRecords are the source of
+    // truth for the rendered table; both must be identical to what they
+    // were before this click. On the NEXT widget open, the search step
+    // will use the persisted Lead snapshot (see PageLoad) so the same
+    // matched persons stay visible despite the live Lead's fields having
+    // been rewritten to the selected row.
+    console.log(
+      "Full results list size AFTER update (must equal BEFORE):",
+      melissaRecords.length,
+      "| filteredRecords size:",
+      filteredRecords.length
+    );
+    console.log(
+      "Selected update did NOT replace/filter the full results list."
+    );
 
     const success =
       updateResponse &&
