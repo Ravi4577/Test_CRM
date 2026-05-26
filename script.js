@@ -65,12 +65,16 @@ const ADDRESS_UPDATE_MODE = "separate"; // "separate" | "compound"
  *   3. Paste those exact `api_name` strings here.
  */
 const FIELD_API_NAMES = {
-  street: "LOCATION_ADDRESS",
-  state:  "LOCATION_ADDRESS_STATE",
-  city:   "LOCATION_ADDRESS_CITY",
-  zip:    "Home_Address_Zip",
-  phone:  "Phone",
-  email:  "Email",
+  street:       "LOCATION_ADDRESS",
+  state:        "LOCATION_ADDRESS_STATE",
+  city:         "LOCATION_ADDRESS_CITY",
+  zip:          "Home_Address_Zip",
+  phone:        "Phone",
+  email:        "Email",
+  // Zoho Lead "Year of Birth" — integer field. If this API name differs in
+  // your org (rare), change ONLY this string; the rest of the payload code
+  // reads through FIELD_API_NAMES.
+  yearOfBirth:  "Year_of_Birth",
 };
 
 /* ===============================
@@ -1526,7 +1530,14 @@ async function updateLeadRecord() {
     homeAddressZip:    String(selectedMelissaRecord.homeAddressZip    || ""),
     phone:             String(selectedMelissaRecord.phone             || ""),
     email:             String(selectedMelissaRecord.email             || ""),
+    // Year of Birth carried into the CRM payload exactly like Phone/Email.
+    // Stored on the row as `birthYear` (set in mapMelissaRecords from
+    // Melissa's DateOfBirth YYYYMM → first 4 chars), surfaced under the
+    // `yearOfBirth` snapshot key to match FIELD_API_NAMES.yearOfBirth.
+    yearOfBirth:       String(selectedMelissaRecord.birthYear         || ""),
   };
+
+  console.log("Selected Melissa birth year (from row):", updateSnapshot.yearOfBirth);
 
   hideBanner();
   if (updateLeadBtn) {
@@ -1660,6 +1671,12 @@ async function updateLeadRecord() {
 // row emits only the four address keys; and so on. Empty cells never reach
 // Zoho, so other CRM fields can't be wiped out.
 function buildUpdatePayload(leadId, rec) {
+  // Year of Birth in Zoho is an integer field. Coerce the snapshot string
+  // ("1989") to a Number; reject anything that isn't a 4-digit year so we
+  // never write garbage like NaN or "" to the CRM.
+  const yobStr = String(rec.yearOfBirth || "").trim();
+  const yobNum = /^\d{4}$/.test(yobStr) ? Number(yobStr) : null;
+
   if (ADDRESS_UPDATE_MODE === "compound") {
     const payload = { id: leadId };
     const homeAddress = {};
@@ -1670,6 +1687,8 @@ function buildUpdatePayload(leadId, rec) {
     if (Object.keys(homeAddress).length) payload.Home_Address = homeAddress;
     if (rec.phone) payload[FIELD_API_NAMES.phone] = rec.phone;
     if (rec.email) payload[FIELD_API_NAMES.email] = rec.email;
+    if (yobNum !== null) payload[FIELD_API_NAMES.yearOfBirth] = yobNum;
+    console.log("CRM payload birth year (compound mode):", payload[FIELD_API_NAMES.yearOfBirth]);
     return payload;
   }
 
@@ -1680,6 +1699,8 @@ function buildUpdatePayload(leadId, rec) {
   if (rec.homeAddressZip)    updatePayload[FIELD_API_NAMES.zip]    = rec.homeAddressZip;
   if (rec.phone)             updatePayload[FIELD_API_NAMES.phone]  = rec.phone;
   if (rec.email)             updatePayload[FIELD_API_NAMES.email]  = rec.email;
+  if (yobNum !== null)       updatePayload[FIELD_API_NAMES.yearOfBirth] = yobNum;
+  console.log("CRM payload birth year (separate mode):", updatePayload[FIELD_API_NAMES.yearOfBirth]);
   return updatePayload;
 }
 
