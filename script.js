@@ -352,39 +352,55 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     if (baseParams.email) {
       searchAttempts.push({
         label: "first + last + email",
+        level: 1,
+        levelLabel: "Progressive Match Level 1 (Name + Email)",
         params: { first: baseParams.first, last: baseParams.last, email: baseParams.email },
       });
     }
     if (baseParams.phone) {
       searchAttempts.push({
         label: "first + last + phone",
+        level: 2,
+        levelLabel: "Progressive Match Level 2 (Name + Phone)",
         params: { first: baseParams.first, last: baseParams.last, phone: baseParams.phone },
       });
     }
     if (baseParams.birthYear) {
       searchAttempts.push({
         label: "first + last + birth year",
+        level: 3,
+        levelLabel: "Progressive Match Level 3 (Name + DOB)",
         params: { first: baseParams.first, last: baseParams.last, birthYear: baseParams.birthYear },
       });
     }
     if (baseParams.postal) {
       searchAttempts.push({
         label: "first + last + postal",
+        level: 4,
+        levelLabel: "Progressive Match Level 4 (Name + ZIP)",
         params: { first: baseParams.first, last: baseParams.last, postal: baseParams.postal },
       });
     }
-    // Fallback ALWAYS runs at the end — do not gate on prior results.
+    // Name-only fallback ALWAYS runs LAST — only reached when every higher
+    // priority returned zero matching records.
     searchAttempts.push({
       label: "first + last fallback",
+      level: 5,
+      levelLabel: "Progressive Match Level 5 (Name Only Fallback)",
       params: { first: baseParams.first, last: baseParams.last },
     });
 
-    console.log(`Will run ${searchAttempts.length} search attempt(s) in order:`,
-      searchAttempts.map((a) => a.label));
+    console.log(`Progressive search: up to ${searchAttempts.length} priority level(s), in order:`,
+      searchAttempts.map((a) => a.levelLabel));
 
-    // 4) Run EVERY attempt — do NOT stop on a successful one. Collect every
-    //    Records[] into a single merged array.
-    const allRecords = [];
+    // 4) PROGRESSIVE MATCHING. Run the attempts in strict priority order. For
+    //    each level, fetch its records, then run the EXISTING dedupe + EXISTING
+    //    two-tier match against them. As soon as a level produces at least one
+    //    matching record, STOP — lower-priority levels are NOT evaluated. Only
+    //    the flow control changed here; dedupe / identity-key / match logic is
+    //    untouched.
+    let matchedRaw = [];
+    let matchedLevelLabel = "";
     let licenseIssueDetected = false;
     let lastTransmissionResults = "";
     let lastRawResponse = null;
@@ -412,11 +428,64 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
 
       const recs = Array.isArray(rawResponse?.Records) ? rawResponse.Records : [];
       console.log(`Attempt "${attempt.label}" raw records returned:`, recs.length, recs);
-      allRecords.push(...recs);
-      console.log(`Total collected records so far:`, allRecords.length);
-    }
 
-    console.log("Total collected records from ALL attempts:", allRecords.length);
+      // 5) Strict dedupe for THIS level's records. Rule 1 — MelissaIdentityKey
+      //    when present. Rule 2 — full strict signature (FullName + DOB +
+      //    CurrentAddress + Zip + ALL phones + ALL emails). Logic unchanged.
+      const uniqueRaw = dedupRawMelissaRecords(recs);
+      console.log(`Attempt "${attempt.label}" duplicate records removed:`, recs.length - uniqueRaw.length);
+      console.log(`Attempt "${attempt.label}" unique records count:`, uniqueRaw.length);
+
+      // 6) Two-tier matching for THIS level (logic unchanged):
+      //    Tier 1 — STRICT: matchesLeadCriteria —
+      //      (First AND Last) AND (Email OR Phone OR Year OR Zip).
+      //    Tier 2 — FALLBACK: matchesLeadNameOnly — First + Last only.
+      //    Records that pass Tier 1 are reported as strict; records that fail
+      //    Tier 1 but pass Tier 2 are reported as fallback. They render
+      //    identically — the tier label is internal/diagnostic only.
+      const strictMatched = [];
+      const fallbackMatched = [];
+      const skippedRecords = [];
+
+      uniqueRaw.forEach((r) => {
+        const key = getMelissaUniqueKey(r);
+        if (matchesLeadCriteria(r, searchLeadRecord)) {
+          strictMatched.push(r);
+          return;
+        }
+        if (matchesLeadNameOnly(r, searchLeadRecord)) {
+          fallbackMatched.push(r);
+          console.log(
+            "Including FALLBACK (name-only) record — strict criteria failed but First+Last matched:",
+            key
+          );
+          return;
+        }
+        skippedRecords.push({
+          key,
+          reason: "First Name and/or Last Name did not match the Lead",
+        });
+      });
+
+      console.log(`Attempt "${attempt.label}" strict matched count:`, strictMatched.length);
+      console.log(`Attempt "${attempt.label}" fallback matched count (first+last only):`, fallbackMatched.length);
+      console.log(`Attempt "${attempt.label}" skipped records with reason:`, skippedRecords);
+
+      // Union — strict first, then fallback. dedupRawMelissaRecords already ran
+      // on uniqueRaw above, so the two arrays are disjoint and the concat is safe.
+      const levelMatched = strictMatched.concat(fallbackMatched);
+
+      // PROGRESSIVE STOP — the first priority level that yields at least one
+      // matching record wins. Lower priorities are skipped entirely.
+      if (levelMatched.length > 0) {
+        matchedRaw = levelMatched;
+        matchedLevelLabel = attempt.levelLabel;
+        console.log(`✓ ${attempt.levelLabel} — ${levelMatched.length} matching record(s). Stopping; lower priorities skipped.`);
+        break;
+      }
+
+      console.log(`✗ ${attempt.levelLabel} — 0 matching records. Continuing to next priority.`);
+    }
 
     // License / access failure — bail out immediately.
     if (licenseIssueDetected) {
@@ -428,64 +497,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // 5) Strict dedupe across the merged array. Rule 1 — MelissaIdentityKey
-    //    when present. Rule 2 — full strict signature (FullName + DOB +
-    //    CurrentAddress + Zip + ALL phones + ALL emails). Anything weaker
-    //    risks collapsing two different people who share a name/DOB/zip.
-    const uniqueRaw = dedupRawMelissaRecords(allRecords);
-    const duplicatesRemoved = allRecords.length - uniqueRaw.length;
-    console.log("Duplicate records removed:", duplicatesRemoved);
-    console.log("Unique records count:", uniqueRaw.length);
-
-    // 6) Two-tier matching to keep all valid persons in the table even when
-    //    the snapshot was created after an earlier Update Lead (the cause of
-    //    the lead-specific regression: snapshot captured already-updated
-    //    CRM values, strict match then drops Person #1 because none of its
-    //    secondary fields line up with Person #2's data).
-    //
-    //    Tier 1 — STRICT: unchanged matchesLeadCriteria —
-    //      (First AND Last) AND (Email OR Phone OR Year OR Zip).
-    //    Tier 2 — FALLBACK: First Name + Last Name only.
-    //      Records returned by the "First + Last fallback" Melissa attempt
-    //      already share the Lead's name; the strict filter was the only
-    //      thing knocking them out. Including them here keeps Person #1
-    //      visible across any future Update Lead.
-    //
-    //    Records that pass Tier 1 are reported as strict; records that fail
-    //    Tier 1 but pass Tier 2 are reported as fallback. They render
-    //    identically — the tier label is internal/diagnostic only.
-    const strictMatched = [];
-    const fallbackMatched = [];
-    const skippedRecords = [];
-
-    uniqueRaw.forEach((r) => {
-      const key = getMelissaUniqueKey(r);
-      if (matchesLeadCriteria(r, searchLeadRecord)) {
-        strictMatched.push(r);
-        return;
-      }
-      if (matchesLeadNameOnly(r, searchLeadRecord)) {
-        fallbackMatched.push(r);
-        console.log(
-          "Including FALLBACK (name-only) record — strict criteria failed but First+Last matched:",
-          key
-        );
-        return;
-      }
-      skippedRecords.push({
-        key,
-        reason: "First Name and/or Last Name did not match the Lead",
-      });
-    });
-
-    console.log("Strict matched records count:", strictMatched.length);
-    console.log("Fallback matched records count (first+last only):", fallbackMatched.length);
-    console.log("Skipped records with reason:", skippedRecords);
-
-    // Union — strict first, then fallback. dedupRawMelissaRecords already
-    // ran on uniqueRaw upstream, so the two arrays are disjoint and the
-    // concat is safe.
-    const matchedRaw = strictMatched.concat(fallbackMatched);
+    console.log("Progressive matching result:", matchedLevelLabel || "no priority level matched");
     console.log("Final rendered records count:", matchedRaw.length);
     console.log(
       "Matched record identity keys:",
