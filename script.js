@@ -5,8 +5,10 @@
  *   1. Zoho SDK PageLoad -> get current Lead ID
  *   2. Fetch current Lead from Zoho CRM (input only)
  *   3. Build Melissa Personator Search request from Lead fields
+ *      Progressive matching: try Level 1 (Name+Email), then Level 2
+ *      (Name+Phone), Level 3 (Name+YOB), Level 4 (Name+ZIP); stop at
+ *      the first level with one or more STRICT matches. No name-only fallback.
  *   4. Call Melissa Personator Search API (broad consumer search)
- *      with a fallback ladder if strict matches return zero records
  *   5. Render every matching Melissa record in the results table
  *   6. User selects a row -> preview shows
  *   7. Update button writes selected Melissa values to current Lead
@@ -341,13 +343,13 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       return;
     }
 
-    // 3) Build every applicable attempt in the required business order:
-    //    (1) First + Last + Email
-    //    (2) First + Last + Phone
-    //    (3) First + Last + Year of Birth
-    //    (4) First + Last + Home Address Zip
-    //    (5) First + Last fallback (always runs at the end)
-    //    Optional fields are skipped only when the Lead has no value for them.
+    // 3) Build every applicable progressive level in the required order:
+    //    Level 1 — First + Last + Email
+    //    Level 2 — First + Last + Phone
+    //    Level 3 — First + Last + Year of Birth
+    //    Level 4 — First + Last + Home Address Zip
+    //    There is NO name-only fallback level. Optional fields are skipped only
+    //    when the Lead has no value for them.
     const searchAttempts = [];
     if (baseParams.email) {
       searchAttempts.push({
@@ -381,24 +383,16 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
         params: { first: baseParams.first, last: baseParams.last, postal: baseParams.postal },
       });
     }
-    // Name-only fallback ALWAYS runs LAST — only reached when every higher
-    // priority returned zero matching records.
-    searchAttempts.push({
-      label: "first + last fallback",
-      level: 5,
-      levelLabel: "Progressive Match Level 5 (Name Only Fallback)",
-      params: { first: baseParams.first, last: baseParams.last },
-    });
 
     console.log(`Progressive search: up to ${searchAttempts.length} priority level(s), in order:`,
       searchAttempts.map((a) => a.levelLabel));
 
     // 4) PROGRESSIVE MATCHING. Run the attempts in strict priority order. For
-    //    each level, fetch its records, then run the EXISTING dedupe + EXISTING
-    //    two-tier match against them. As soon as a level produces at least one
-    //    matching record, STOP — lower-priority levels are NOT evaluated. Only
-    //    the flow control changed here; dedupe / identity-key / match logic is
-    //    untouched.
+    //    each level, fetch its records, then run the EXISTING dedupe + the
+    //    EXISTING strict match against them. As soon as a level produces at
+    //    least one strict-matching record, STOP — lower-priority levels are NOT
+    //    evaluated. There is NO name-only fallback: only strict matches of the
+    //    successful level are rendered.
     let matchedRaw = [];
     let matchedLevelLabel = "";
     let licenseIssueDetected = false;
@@ -436,15 +430,11 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
       console.log(`Attempt "${attempt.label}" duplicate records removed:`, recs.length - uniqueRaw.length);
       console.log(`Attempt "${attempt.label}" unique records count:`, uniqueRaw.length);
 
-      // 6) Two-tier matching for THIS level (logic unchanged):
-      //    Tier 1 — STRICT: matchesLeadCriteria —
-      //      (First AND Last) AND (Email OR Phone OR Year OR Zip).
-      //    Tier 2 — FALLBACK: matchesLeadNameOnly — First + Last only.
-      //    Records that pass Tier 1 are reported as strict; records that fail
-      //    Tier 1 but pass Tier 2 are reported as fallback. They render
-      //    identically — the tier label is internal/diagnostic only.
+      // 6) STRICT matching for THIS level (logic unchanged):
+      //    matchesLeadCriteria — (First AND Last) AND (Email OR Phone OR Year OR Zip).
+      //    There is NO name-only fallback tier: a record is kept ONLY if it
+      //    passes the strict criteria. Records that fail are skipped.
       const strictMatched = [];
-      const fallbackMatched = [];
       const skippedRecords = [];
 
       uniqueRaw.forEach((r) => {
@@ -453,30 +443,20 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
           strictMatched.push(r);
           return;
         }
-        if (matchesLeadNameOnly(r, searchLeadRecord)) {
-          fallbackMatched.push(r);
-          console.log(
-            "Including FALLBACK (name-only) record — strict criteria failed but First+Last matched:",
-            key
-          );
-          return;
-        }
         skippedRecords.push({
           key,
-          reason: "First Name and/or Last Name did not match the Lead",
+          reason: "Did not pass strict criteria (First AND Last) AND (Email OR Phone OR Year OR Zip)",
         });
       });
 
       console.log(`Attempt "${attempt.label}" strict matched count:`, strictMatched.length);
-      console.log(`Attempt "${attempt.label}" fallback matched count (first+last only):`, fallbackMatched.length);
       console.log(`Attempt "${attempt.label}" skipped records with reason:`, skippedRecords);
 
-      // Union — strict first, then fallback. dedupRawMelissaRecords already ran
-      // on uniqueRaw above, so the two arrays are disjoint and the concat is safe.
-      const levelMatched = strictMatched.concat(fallbackMatched);
+      // Only the strict matches of this level are eligible for rendering.
+      const levelMatched = strictMatched;
 
       // PROGRESSIVE STOP — the first priority level that yields at least one
-      // matching record wins. Lower priorities are skipped entirely.
+      // strict-matching record wins. Lower priorities are skipped entirely.
       if (levelMatched.length > 0) {
         matchedRaw = levelMatched;
         matchedLevelLabel = attempt.levelLabel;
@@ -507,9 +487,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     setLoading(false);
 
     if (matchedRaw.length === 0) {
-      setEmptyMessage(
-        "No Melissa records matched: (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)."
-      );
+      setEmptyMessage("No matching records found.");
       showEmpty(true);
       showResults(false);
       return;
@@ -527,9 +505,7 @@ ZOHO.embeddedApp.on("PageLoad", async function (data) {
     );
 
     if (uniqueRows.length === 0) {
-      setEmptyMessage(
-        "No Melissa records matched: (First Name AND Last Name) AND (Email OR Phone OR Birth Year OR Zip)."
-      );
+      setEmptyMessage("No matching records found.");
       showEmpty(true);
       showResults(false);
       return;
@@ -742,26 +718,6 @@ function matchesLeadCriteria(record, lead) {
   });
 
   return finalMatchResult;
-}
-
-// Name-only fallback predicate. Returns true when the record's First Name
-// AND Last Name match the Lead's First Name AND Last Name. Used as Tier 2
-// of the result filter so that records returned by the First+Last fallback
-// Melissa attempt are kept even when every secondary criterion (Email /
-// Phone / Year / Zip) has been rewritten by an Update Lead click.
-function matchesLeadNameOnly(record, lead) {
-  const leadFirstName = normalizeName(lead?.First_Name);
-  const leadLastName  = normalizeName(lead?.Last_Name);
-  if (!leadFirstName || !leadLastName) return false;
-
-  const recFirstName = normalizeName(
-    record?.Name?.FirstName || record?.FirstName || record?.First_Name || record?.First
-  );
-  const recLastName = normalizeName(
-    record?.Name?.LastName || record?.LastName || record?.Last_Name || record?.Last
-  );
-
-  return recFirstName === leadFirstName && recLastName === leadLastName;
 }
 
 // Build the strict identity key for a raw Melissa record.
